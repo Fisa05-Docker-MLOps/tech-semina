@@ -14,5 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application's code into the container at /app
 COPY . /app/
 
+# COPY run.sh .
+# RUN chmod +x ./run.sh
+
 # Default command can be overridden in docker-compose.yml
-CMD ["python", "module/mlflow_train.py"]
+CMD ["python3", "back_test.py"]

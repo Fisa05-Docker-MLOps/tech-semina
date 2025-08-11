@@ -11,7 +11,7 @@ load_dotenv()
 
 # 이제 os.environ을 통해 .env 파일에 정의된 변수를 사용할 수 있습니다.
 DB_HOST = os.environ.get('DB_HOST')
-DB_PORT = int(os.environ.get('DB_PORT', '3306'))
+DB_PORT = int(os.environ.get('DB_PORT'))
 DB_NAME = os.environ.get('DB_NAME')
 DB_USER = os.environ.get('DB_USER')
 DB_PASSWORD = os.environ.get('DB_PASSWORD')
@@ -51,23 +51,16 @@ def get_ohlcv(base_datetime: str) -> pd.DataFrame:
         pd.DataFrame: ohlcv 데이터가 포함된 DataFrame
     """
 
-    df_all = []
     with get_db_connection() as conn:
-        # 아직 table 명이 정해지지 않음 -> 수정&확인 필요
-        for symbol in ['btc', 'gold', 'ndx100', 'vix']:
-            query_get_ohlcv = """
-                SELECT *
-                FROM %s.%s
-                WHERE datetime BETWEEN DATE_SUB(%s, INTERVAL 1 MONTH) AND %s;
-                """
-            df = pd.read_sql_query(
-                query_get_ohlcv,
-                conn,
-                params=[DB_NAME, symbol, base_datetime, base_datetime]
-            )
-            df_all.append(df)
-        
-    if not df_all:
-        return pd.DataFrame()
+        query_get_ohlcv = f"""
+            SELECT *
+            FROM {DB_NAME}.integrated_data
+            WHERE datetime BETWEEN DATE_SUB(%s, INTERVAL 1 MONTH) AND %s;
+            """
+        df = pd.read_sql_query(
+            query_get_ohlcv,
+            conn,
+            params=[base_datetime, base_datetime]
+        )
 
-    return pd.DataFrame(df_all, ignore_index=True).sort_values(by='Datetime').reset_index(drop=True)
+    return df.sort_values(by='datetime').reset_index(drop=True)

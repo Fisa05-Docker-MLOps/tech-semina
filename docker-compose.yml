@@ -108,6 +108,7 @@ services:
     restart: always
     depends_on:
       - mlflow-server
+      - training-client
     ports:
       - "8000:8000"
     environment:
@@ -125,7 +126,10 @@ services:
       BTC_CLOSE_INDEX: -1
       X_SCALER_FILENAME: x_scaler.pkl
       Y_SCALER_FILENAME: y_scaler.pkl
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
+    command: ["python3", "start_server.py"]
 
 volumes:
   db_data:

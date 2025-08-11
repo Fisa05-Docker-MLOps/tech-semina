@@ -70,6 +70,3 @@ CREATE TABLE IF NOT EXISTS integrated_data (
 
 
 
--- 사용자 계정 생성 및 권한 부여
-CREATE USER 'mlops_user'@'%' IDENTIFIED BY '0000';
-GRANT ALL PRIVILEGES ON mlops_db.* TO 'mlops_user'@'%';

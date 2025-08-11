@@ -38,6 +38,7 @@ mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 ml_client = MlflowClient()
 
 # ---- MinIO 클라이언트 ----
+logger.info(f"Initializing Minio client with endpoint: {MINIO_ENDPOINT}, secure: {MINIO_SECURE}")
 minio_client = Minio(
     MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
@@ -155,21 +156,38 @@ def ensure_model_ready(alias: Optional[str] = None):
     if getattr(app.state, "model", None) is not None and getattr(app.state, "model_alias", None) == alias:
         return
 
-    # 1) Registry에서 alias로 source 획득
-    source = resolve_model_source_from_registry(REGISTERED_MODEL_NAME, alias)
-    # 2) MinIO로부터 artifact 디렉토리 동기화
-    bucket, prefix = parse_s3_uri(source)
-    download_prefix_from_minio(bucket, prefix, LOCAL_MODEL_DIR)
-    # 3) 모델 로드
-    model = load_pytorch_model(LOCAL_MODEL_DIR)
-    app.state.model = model
-    app.state.model_alias = alias
+    logger.info(f"Loading model '{REGISTERED_MODEL_NAME}' with alias '{alias}'...")
+    try:
+        # Get model version info by alias
+        mv = ml_client.get_model_version_by_alias(name=REGISTERED_MODEL_NAME, alias=alias)
+        model_version = mv.version
+        model_source_uri = mv.source # This is the s3:// URI or models:/ URI from MLflow
 
-    # 4) 스케일러(있으면 로드)
-    x_scaler = try_load_pickle(pathlib.Path(LOCAL_MODEL_DIR) / X_SCALER_FILENAME)
-    y_scaler = try_load_pickle(pathlib.Path(LOCAL_MODEL_DIR) / Y_SCALER_FILENAME)
-    app.state.x_scaler = x_scaler
-    app.state.y_scaler = y_scaler
+        # Use mlflow.pyfunc.load_model with the direct source URI
+        model = mlflow.pyfunc.load_model(model_source_uri)
+        app.state.model = model
+        app.state.model_alias = alias
+        logger.info(f"Model '{REGISTERED_MODEL_NAME}' (version {model_version}) loaded successfully from source URI.")
+
+        # Scalers are usually logged as artifacts alongside the model.
+        # We need to download them from the artifact URI associated with the model version.
+        # This requires getting the model version info first.
+        mv = ml_client.get_model_version_by_alias(name=REGISTERED_MODEL_NAME, alias=alias)
+        source = mv.source # This will be the s3:// URI
+        bucket, prefix = parse_s3_uri(source)
+        
+        # Download scalers to LOCAL_MODEL_DIR
+        download_prefix_from_minio(bucket, prefix, LOCAL_MODEL_DIR)
+
+        x_scaler = try_load_pickle(pathlib.Path(LOCAL_MODEL_DIR) / X_SCALER_FILENAME)
+        y_scaler = try_load_pickle(pathlib.Path(LOCAL_MODEL_DIR) / Y_SCALER_FILENAME)
+        app.state.x_scaler = x_scaler
+        app.state.y_scaler = y_scaler
+        logger.info("Scalers loaded successfully.")
+
+    except Exception as e:
+        logger.exception(f"Failed to load model '{REGISTERED_MODEL_NAME}' with alias '{alias}'.")
+        raise RuntimeError(f"모델 로드 실패: {e}") from e
 
 # 콜백 POST
 async def post_callback(url: str, payload: dict):

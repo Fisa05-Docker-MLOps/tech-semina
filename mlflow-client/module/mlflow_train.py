@@ -25,7 +25,7 @@ print("Started")
 # -------------------------------------------------------------------
 # 중앙 MLflow 서버의 주소를 설정합니다. (환경 변수로 설정하는 것을 권장)
 # 예: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri mysql+pymysql://... --default-artifact-root s3://...
-MLFLOW_TRACKING_URI = "http://mlflow:5000" # 실제 환경에서는 MLflow 서버의 IP 주소 또는 도메인
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow-server:5000") # 실제 환경에서는 MLflow 서버의 IP 주소 또는 도메인
 EXPERIMENT_NAME = "BTC Close Prediction with LSTM"
 REGISTERED_MODEL_NAME = "BTC_LSTM_Production"
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)

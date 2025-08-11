@@ -99,7 +99,7 @@ services:
       DB_USER: mlops_user
       DB_PASSWORD: ${MYSQL_USER_PASSWORD}
 
-    command: ["python", "module/mlflow_train.py"]
+    command: ["python3", "module/mlflow_train.py"]
 
   inference-server:
     build:

@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  db:
+    image: mysql:latest
+    container_name: mlops_db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Seoul
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db-setup/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 7s
+      timeout: 3s
+      retries: 30
+
+  etl:
+    build:
+      context: ./data-ingestion
+    container_name: mlops-etl
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./data-ingestion/.env
+    command: ["python", "data_ingestion.py"]
+
+
+volumes:
+  db_data:

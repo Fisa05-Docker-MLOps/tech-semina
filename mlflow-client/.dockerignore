@@ -1,0 +1,8 @@
+Dockerfile
+scripts/*.sh
+
+.gitignore
+
+**/__pycache__/
+.venv/
+.env

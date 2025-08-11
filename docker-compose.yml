@@ -1,0 +1,119 @@
+version: "3.8"
+
+services:
+  mlflow-backend-store:
+    image: mysql:8.0
+    container_name: mlflow-backend-store
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: mlops_db
+      MYSQL_USER: mlops_user
+      MYSQL_PASSWORD: ${MYSQL_USER_PASSWORD}
+      TZ: Asia/Seoul
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./mlops-db-ingestion/db-setup/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  etl-job:
+    build:
+      context: ./mlops-db-ingestion/data-ingestion
+    container_name: mlops-etl-job
+    depends_on:
+      mlflow-backend-store:
+        condition: service_healthy
+    environment:
+      PASSWD: ${MYSQL_USER_PASSWORD}
+      DB_URL: mysql+pymysql://mlops_user:${MYSQL_USER_PASSWORD}@mlflow-backend-store/mlops_db?charset=utf8mb4
+    command: ["python", "data_ingestion.py"]
+
+  mlflow-artifact-store:
+    image: minio/minio:RELEASE.2024-01-18T22-51-28Z
+    container_name: mlflow-artifact-store
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address :9001
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mlflow-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    container_name: mlflow-server
+    restart: always
+    depends_on:
+      mlflow-backend-store:
+        condition: service_healthy
+      mlflow-artifact-store:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
+    command: >
+      sh -c "
+      mc config host add minio http://mlflow-artifact-store:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing minio/mlflow &&
+      mc policy set public minio/mlflow &&
+      echo 'Bucket created, starting mlflow server...' &&
+      mlflow server \
+      --backend-store-uri mysql+pymysql://mlops_user:${MYSQL_USER_PASSWORD}@mlflow-backend-store:3306/mlops_db \
+      --default-artifact-root s3://mlflow/ \
+      --host 0.0.0.0
+      "
+
+  training-client:
+    build:
+      context: ./mlflow-client
+    container_name: mlops_training_client
+    depends_on:
+      - mlflow-server
+    environment:
+      PYTHONPATH: /app
+      MLFLOW_TRACKING_URI: http://mlflow-server:5000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
+    command: ["python", "module/mlflow_train.py"]
+
+  inference-server:
+    build:
+      context: ./mlops_inference_server
+    container_name: mlops_inference_server
+    restart: always
+    depends_on:
+      - mlflow-server
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONPATH: /app
+      MLFLOW_TRACKING_URI: http://mlflow-server:5000
+      REGISTERED_MODEL_NAME: BTC_LSTM_Production
+      MODEL_ALIAS: staging
+      MINIO_ENDPOINT: mlflow-artifact-store:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_SECURE: 0
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+volumes:
+  db_data:
+  minio_data:

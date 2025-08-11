@@ -1,0 +1,11 @@
+.venv/
+
+__pycache__/
+
+# 환경 변수 파일
+.env
+data-ingestion/.env
+
+# Docker build 캐시/임시 파일
+*.log
+*.sqlite3

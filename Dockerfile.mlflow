@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod +x /usr/local/bin/mc
 
 # Install Python packages
-RUN pip install --no-cache-dir mlflow mysql-connector-python boto3 pymysql
+RUN pip install --no-cache-dir mlflow mysql-connector-python boto3 pymysql cryptography
 
 # Default command can be overridden in docker-compose.yml
 CMD ["mlflow", "server"]

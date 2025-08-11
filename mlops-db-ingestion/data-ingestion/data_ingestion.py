@@ -16,7 +16,7 @@ from loader_ndx import fetch_ndx_data
 load_dotenv()
 
 db_passwd = os.getenv("PASSWD")
-DB_URL = f"mysql+pymysql://mlops_user:{db_passwd}@db/mlops_db?charset=utf8mb4"
+DB_URL = f"mysql+pymysql://mlops_user:{db_passwd}@mlflow-backend-store/mlops_db?charset=utf8mb4"
 engine = create_engine(DB_URL, pool_pre_ping=True, future=True)
 
 def connect_to_db_with_sqlalchemy() -> Connection:

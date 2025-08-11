@@ -70,7 +70,7 @@ services:
       MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
     command: >
       sh -c "
-      mc config host add minio http://mlflow-artifact-store:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc alias set minio http://mlflow-artifact-store:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
       mc mb --ignore-existing minio/mlflow &&
       mc policy set public minio/mlflow &&
       echo 'Bucket created, starting mlflow server...' &&
@@ -86,6 +86,7 @@ services:
     container_name: mlops_training_client
     depends_on:
       - mlflow-server
+      - etl-job
     environment:
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow-server:5000

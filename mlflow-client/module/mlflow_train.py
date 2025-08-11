@@ -185,42 +185,42 @@ def train_model_with_month(base_date: str, alias: str):
 
     print("\nMLflow Run Completed.")
 
-    # -------------------------------------------------------------------
-    # 4. 모델 레지스트리(Model Registry) 상호작용 (개선된 방식)
-    # -------------------------------------------------------------------
-    print("\nInteracting with Model Registry using Aliases...")
+    # # -------------------------------------------------------------------
+    # # 4. 모델 레지스트리(Model Registry) 상호작용 (개선된 방식)
+    # # -------------------------------------------------------------------
+    # print("\nInteracting with Model Registry using Aliases...")
     
 
-    # --- 최신 버전 정보 가져오기 ---
-    # 가장 최근에 등록된 버전의 정보를 가져옵니다.
-    # search_model_versions는 더 상세한 검색을 제공합니다.
-    # "name='BTC_LSTM_Production'"은 검색 조건입니다.
-    latest_version_info = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")[-1]
-    latest_version = latest_version_info.version
+    # # --- 최신 버전 정보 가져오기 ---
+    # # 가장 최근에 등록된 버전의 정보를 가져옵니다.
+    # # search_model_versions는 더 상세한 검색을 제공합니다.
+    # # "name='BTC_LSTM_Production'"은 검색 조건입니다.
+    # latest_version_info = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")[-1]
+    # latest_version = latest_version_info.version
 
-    print(f"Latest Model: {latest_version_info.name}, Version: {latest_version}, Current Aliases: {latest_version_info.aliases}")
-
-
-    # --- 모델 버전에 별칭(Alias) 설정하기 ---
-    # 'Staging' 단계로 보내는 대신 'staging'이라는 별칭을 붙입니다.
-    # 이 별칭은 해당 모델 이름 내에서 고유하며, 다른 버전에 있던 'staging' 별칭은 자동으로 이 버전으로 옮겨집니다.
-    alias_name = "staging"
-    client.set_registered_model_alias(
-        name=REGISTERED_MODEL_NAME,
-        alias=alias_name,
-        version=latest_version
-    )
-    print(f"✅ Version {latest_version}에 '{alias_name}' 별칭을 성공적으로 설정했습니다.")
+    # print(f"Latest Model: {latest_version_info.name}, Version: {latest_version}, Current Aliases: {latest_version_info.aliases}")
 
 
-    # --- (참고) 별칭으로 모델 불러오기 ---
-    # 나중에 추론 서버 등에서 이 별칭을 사용하여 모델을 불러올 수 있습니다.
-    try:
-        model_by_alias = client.get_model_version_by_alias(
-            name=REGISTERED_MODEL_NAME,
-            alias=alias_name
-        )
-        print(f"\n'{alias_name}' 별칭으로 모델을 찾았습니다: Version {model_by_alias.version}")
-        # 모델 로드: mlflow.pytorch.load_model(model_by_alias.source)
-    except Exception as e:
-        print(f"별칭으로 모델을 찾는 데 실패했습니다: {e}")
+    # # --- 모델 버전에 별칭(Alias) 설정하기 ---
+    # # 'Staging' 단계로 보내는 대신 'staging'이라는 별칭을 붙입니다.
+    # # 이 별칭은 해당 모델 이름 내에서 고유하며, 다른 버전에 있던 'staging' 별칭은 자동으로 이 버전으로 옮겨집니다.
+    # alias_name = "staging"
+    # client.set_registered_model_alias(
+    #     name=REGISTERED_MODEL_NAME,
+    #     alias=alias_name,
+    #     version=latest_version
+    # )
+    # print(f"✅ Version {latest_version}에 '{alias_name}' 별칭을 성공적으로 설정했습니다.")
+
+
+    # # --- (참고) 별칭으로 모델 불러오기 ---
+    # # 나중에 추론 서버 등에서 이 별칭을 사용하여 모델을 불러올 수 있습니다.
+    # try:
+    #     model_by_alias = client.get_model_version_by_alias(
+    #         name=REGISTERED_MODEL_NAME,
+    #         alias=alias_name
+    #     )
+    #     print(f"\n'{alias_name}' 별칭으로 모델을 찾았습니다: Version {model_by_alias.version}")
+    #     # 모델 로드: mlflow.pytorch.load_model(model_by_alias.source)
+    # except Exception as e:
+    #     print(f"별칭으로 모델을 찾는 데 실패했습니다: {e}")

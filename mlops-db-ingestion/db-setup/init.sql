@@ -45,6 +45,30 @@ CREATE TABLE IF NOT EXISTS ndx100_data (
     close DECIMAL(20,8) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS integrated_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    datetime DATETIME NOT NULL UNIQUE,
+    btc_open FLOAT NOT NULL,
+    btc_high FLOAT NOT NULL,
+    btc_low FLOAT NOT NULL,
+    btc_close FLOAT NOT NULL,
+    btc_volume FLOAT,
+    ndx_open DECIMAL(20,8),
+    ndx_high DECIMAL(20,8),
+    ndx_low DECIMAL(20,8),
+    ndx_close DECIMAL(20,8),
+    vix_open DECIMAL(20,8),
+    vix_high DECIMAL(20,8),
+    vix_low DECIMAL(20,8),
+    vix_close DECIMAL(20,8),
+    gold_open DECIMAL(20,8),
+    gold_high DECIMAL(20,8),
+    gold_low DECIMAL(20,8),
+    gold_close DECIMAL(20,8),
+    gold_volume DECIMAL(20,8)
+);
+
+
 
 -- 사용자 계정 생성 및 권한 부여
 CREATE USER 'mlops_user'@'%' IDENTIFIED BY '0000';

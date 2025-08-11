@@ -92,6 +92,12 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
+      DB_HOST: mysql+pymysql://mlops_user:${MYSQL_USER_PASSWORD}@mlflow-backend-store/mlops_db?charset=utf8mb4
+      DB_PORT: 3306
+      DB_NAME: mlops_db
+      DB_USER: mlops_user
+      DB_PASSWORD: ${MYSQL_USER_PASSWORD}
+
     command: ["python", "module/mlflow_train.py"]
 
   inference-server:
@@ -112,6 +118,12 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_SECURE: 0
+      LOCAL_MODEL_DIR: /tmp/btc-lstm-model
+      SEQ_LEN_REQUIRED: 12
+      N_FEATURES_REQUIRED: 18
+      BTC_CLOSE_INDEX: -1
+      X_SCALER_FILENAME: x_scaler.pkl
+      Y_SCALER_FILENAME: y_scaler.pkl
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:

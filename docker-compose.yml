@@ -117,7 +117,7 @@ services:
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow-server:5000
       REGISTERED_MODEL_NAME: BTC_LSTM_Production
-      MODEL_ALIAS: staging
+      MODEL_ALIAS: backtest_20240201
       MINIO_ENDPOINT: mlflow-artifact-store:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
@@ -128,6 +128,9 @@ services:
       BTC_CLOSE_INDEX: -1
       X_SCALER_FILENAME: x_scaler.pkl
       Y_SCALER_FILENAME: y_scaler.pkl
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL:  http://mlflow-artifact-store:9000
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:

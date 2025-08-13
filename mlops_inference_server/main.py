@@ -28,7 +28,14 @@ MODEL_ALIAS = os.getenv("MODEL_ALIAS", "staging")
 SEQ_LEN_REQUIRED = int(os.getenv("SEQ_LEN_REQUIRED", "12"))
 N_FEATURES_REQUIRED = int(os.getenv("N_FEATURES_REQUIRED", "18"))
 # 예측에 사용할 피처들의 컬럼 이름을 리스트로 관리하는 것이 좋습니다.
-FEATURE_COLUMNS = [f'feature_{i}' for i in range(N_FEATURES_REQUIRED)]
+# FEATURE_COLUMNS = [f'feature_{i}' for i in range(N_FEATURES_REQUIRED)]
+FEATURE_COLUMNS = [
+    'btc_open', 'btc_high', 'btc_low', 'btc_close', 'btc_volume',
+    'ndx_open', 'ndx_high', 'ndx_low', 'ndx_close',
+    'vix_open', 'vix_high', 'vix_low', 'vix_close',
+    'gold_open', 'gold_high', 'gold_low', 'gold_close', 'gold_volume'
+]
+
 # ---- MLflow 설정 ----
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 app = FastAPI(title="LSTM Inference with MLflow PyFunc", version="2.0.0")

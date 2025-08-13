@@ -1,5 +1,6 @@
 import os
 import time
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -17,7 +18,7 @@ from mlflow.data.pandas_dataset import from_pandas
 from db import get_ohlcv
 from module.utils import seed_everything, RMSELoss
 from module.data import TimeSeriesDatasetXY
-from module.model import LSTM, train_epoch, predict
+from module.model import LSTM, LstmWithScaler, train_epoch, predict
 
 
 def train_model_with_month(base_date: str, alias: str):
@@ -140,15 +141,35 @@ def train_model_with_month(base_date: str, alias: str):
         # 나중에 추론 서버에서 쉽게 불러올 수 있게 해줍니다.
         # registered_model_name을 지정하면 모델 레지스트리에 자동으로 등록됩니다.
         
-        sample_data, _ = next(iter(train_loader))
-        sample_data = sample_data.numpy().astype(np.float32)
+        # Scaler 아티팩트 등록
+        os.makedirs("./scaler", exist_ok=True)
+        scaler_x_path = "./scaler/x_scaler.pkl"
+        scaler_y_path = "./scaler/y_scaler.pkl"
+        joblib.dump(x_scaler, scaler_x_path)
+        joblib.dump(y_scaler, scaler_y_path)
 
-        # 💡 PyTorch 모델 기록!
-        model_info = mlflow.pytorch.log_model(
-            pytorch_model=model.cpu(),       # 저장할 PyTorch 모델 객체
-            name="btc-lstm-model",  # 아티팩트 저장소 내의 경로
-            registered_model_name=REGISTERED_MODEL_NAME, # 모델 레지스트리에 등록할 이름 (선택사항)
-            input_example=sample_data # 입력 예시 (모델의 입력 형태를 정의)
+        sample_data = x_train.head(SEQ_LEN)
+
+        # 스케일러 포함 예측 파이프라인 정의
+        pipeline_model = LstmWithScaler(
+            model=model.cpu(),
+            x_scaler=x_scaler,
+            y_scaler=y_scaler
+        )
+
+        # pyfunc 모델로 파이프라인 로깅
+        model_info = mlflow.pyfunc.log_model(
+            name="btc-lstm-model", # 아티팩트 저장소 내의 폴더 이름
+            python_model=pipeline_model,
+            # 의존성이 있는 사용자 정의 코드 경로 지정
+            infer_code_paths=["./module/model.py"], 
+            # 모델과 함께 저장할 추가 파일들
+            artifacts={
+                "x_scaler": scaler_x_path,
+                "y_scaler": scaler_y_path
+            },
+            registered_model_name=REGISTERED_MODEL_NAME,
+            input_example=sample_data
         )
         print("\nPyTorch LSTM 모델이 MLflow에 성공적으로 기록되었습니다.")
 
@@ -166,61 +187,21 @@ def train_model_with_month(base_date: str, alias: str):
         # logged_model_uri = f"runs:/{run.info.run_id}/lstm-model"
         # loaded_model = mlflow.pytorch.load_model(logged_model_uri)
         # >>> 로컬 파일 경로로 불러오기
-        print("\n--- 모델 로드 테스트 시작 ---")
-        try:
-            # 하드코딩된 실험 ID 대신, 방금 실행한 정보로 동적으로 경로 생성
-            model_path = f"./mlruns/{exp_id}/{run_id}/artifacts/btc-lstm-model"
-            if os.path.exists(model_path):
-                loaded_model = mlflow.pytorch.load_model(model_path)
-                print("✅ 파일 경로로 모델 로드 성공:", loaded_model)
-            else:
-                # runs:/ 스키마로 로드 시도 (서버에 artifact-root가 올바르게 설정된 경우)
-                logged_model_uri = f"runs:/{run_id}/btc-lstm-model"
-                loaded_model = mlflow.pytorch.load_model(logged_model_uri)
-                print("✅ runs:/ URI로 모델 로드 성공:", loaded_model)
+        # print("\n--- 모델 로드 테스트 시작 ---")
+        # try:
+        #     # 하드코딩된 실험 ID 대신, 방금 실행한 정보로 동적으로 경로 생성
+        #     model_path = f"./mlruns/{exp_id}/{run_id}/artifacts/btc-lstm-model"
+        #     if os.path.exists(model_path):
+        #         loaded_model = mlflow.pyfunc.load_model(model_path)
+        #         print("✅ 파일 경로로 모델 로드 성공:", loaded_model)
+        #     else:
+        #         # runs:/ 스키마로 로드 시도 (서버에 artifact-root가 올바르게 설정된 경우)
+        #         logged_model_uri = f"runs:/{run_id}/btc-lstm-model"
+        #         loaded_model = mlflow.pyfunc.load_model(logged_model_uri)
+        #         print("✅ runs:/ URI로 모델 로드 성공:", loaded_model)
 
-        except Exception as e:
-            print(f"❌ 모델 로드 실패: {e}")
-            print("팁: mlflow server 실행 시 --default-artifact-root 옵션이 올바르게 설정되었는지 확인하세요.")
+        # except Exception as e:
+        #     print(f"❌ 모델 로드 실패: {e}")
+        #     print("팁: mlflow server 실행 시 --default-artifact-root 옵션이 올바르게 설정되었는지 확인하세요.")
 
     print("\nMLflow Run Completed.")
-
-    # # -------------------------------------------------------------------
-    # # 4. 모델 레지스트리(Model Registry) 상호작용 (개선된 방식)
-    # # -------------------------------------------------------------------
-    # print("\nInteracting with Model Registry using Aliases...")
-    
-
-    # # --- 최신 버전 정보 가져오기 ---
-    # # 가장 최근에 등록된 버전의 정보를 가져옵니다.
-    # # search_model_versions는 더 상세한 검색을 제공합니다.
-    # # "name='BTC_LSTM_Production'"은 검색 조건입니다.
-    # latest_version_info = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")[-1]
-    # latest_version = latest_version_info.version
-
-    # print(f"Latest Model: {latest_version_info.name}, Version: {latest_version}, Current Aliases: {latest_version_info.aliases}")
-
-
-    # # --- 모델 버전에 별칭(Alias) 설정하기 ---
-    # # 'Staging' 단계로 보내는 대신 'staging'이라는 별칭을 붙입니다.
-    # # 이 별칭은 해당 모델 이름 내에서 고유하며, 다른 버전에 있던 'staging' 별칭은 자동으로 이 버전으로 옮겨집니다.
-    # alias_name = "staging"
-    # client.set_registered_model_alias(
-    #     name=REGISTERED_MODEL_NAME,
-    #     alias=alias_name,
-    #     version=latest_version
-    # )
-    # print(f"✅ Version {latest_version}에 '{alias_name}' 별칭을 성공적으로 설정했습니다.")
-
-
-    # # --- (참고) 별칭으로 모델 불러오기 ---
-    # # 나중에 추론 서버 등에서 이 별칭을 사용하여 모델을 불러올 수 있습니다.
-    # try:
-    #     model_by_alias = client.get_model_version_by_alias(
-    #         name=REGISTERED_MODEL_NAME,
-    #         alias=alias_name
-    #     )
-    #     print(f"\n'{alias_name}' 별칭으로 모델을 찾았습니다: Version {model_by_alias.version}")
-    #     # 모델 로드: mlflow.pytorch.load_model(model_by_alias.source)
-    # except Exception as e:
-    #     print(f"별칭으로 모델을 찾는 데 실패했습니다: {e}")

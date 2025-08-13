@@ -1,10 +1,16 @@
-from typing import Optional, Tuple, List
+from typing import Optional
 
 import numpy as np
+import pandas as pd
+
+from sklearn.preprocessing import StandardScaler
+
 import torch
 from torch import nn
 from torch.optim import Optimizer
-from torch.utils.data import DataLoader
+from torch.utils.data import TensorDataset, DataLoader
+
+import mlflow
 
 
 class LSTM(nn.Module):
@@ -27,7 +33,66 @@ class LSTM(nn.Module):
         out, _ = self.lstm(x, (h0, c0))
         out = self.fc(out[:, -1, :])  # take the last time step
         return out
-    
+
+class LstmWithScaler(mlflow.pyfunc.PythonModel):
+    def __init__(self,
+                 model: LSTM,
+                 x_scaler: StandardScaler,
+                 y_scaler: StandardScaler):
+        self.model = model
+        self.x_scaler = x_scaler
+        self.y_scaler = y_scaler
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _create_sequences(self, data: np.ndarray) -> np.ndarray:
+        """
+        2D 입력 데이터를 받아 3D 슬라이딩 윈도우 시퀀스를 생성하는 내부 헬퍼 함수.
+        """
+        sequences = []
+        for i in range(len(data) - 12 + 1):
+            sequences.append(data[i : i + 12])
+        return np.array(sequences)
+
+    def predict(self, context, model_input: pd.DataFrame) -> np.ndarray:
+        """
+        어떤 길이의 입력 데이터든 받아, 슬라이딩 윈도우 방식으로 전체 예측을 수행합니다.
+        
+        :param context: MLflow 컨텍스트 (여기서는 사용 안 함)
+        :param model_input: 예측할 원본 데이터 (pandas DataFrame)
+        :return: 최종 예측 결과 (numpy array)
+        """
+        # 1. 입력 데이터를 StandardScaler로 스케일링합니다.
+        scaled_input_np = self.x_scaler.transform(model_input)
+        
+        # 2. 스케일링된 데이터를 3D 시퀀스 형태로 변환합니다.
+        #    입력 데이터가 너무 짧으면 빈 배열을 반환합니다.
+        if len(scaled_input_np) < 12:
+            return np.array([])
+            
+        sequences_np = self._create_sequences(scaled_input_np)
+        sequences_tensor = torch.FloatTensor(sequences_np)
+
+        # 3. 예측을 위해 PyTorch DataLoader를 사용합니다.
+        pred_dataset = TensorDataset(sequences_tensor)
+        pred_loader = DataLoader(pred_dataset, batch_size=64, shuffle=False)
+        
+        # 4. 모델 예측을 수행합니다.
+        self.model.eval().to(self.device)
+        predictions_scaled = []
+        with torch.no_grad():
+            for x_batch_tuple in pred_loader:
+                x_batch = x_batch_tuple[0].to(self.device)
+                y_pred_batch = self.model(x_batch)
+                predictions_scaled.append(y_pred_batch.cpu().numpy())
+        
+        predictions_scaled = np.concatenate(predictions_scaled, axis=0)
+
+        # 5. 예측 결과를 원래 스케일로 복원합니다.
+        prediction_unscaled = self.y_scaler.inverse_transform(predictions_scaled)
+        
+        return prediction_unscaled.flatten()
+
 
 def train_epoch(
     model: nn.Module,

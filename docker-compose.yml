@@ -5,6 +5,8 @@ services:
     image: mysql:8.0
     container_name: mlflow-backend-store
     restart: always
+    ports:
+      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: mlops_db

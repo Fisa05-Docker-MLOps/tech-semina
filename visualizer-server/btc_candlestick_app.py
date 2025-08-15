@@ -5,16 +5,14 @@ import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime, timedelta
 import requests
-import mlflow
 import os
-from db_func import fetch_all_btc_four_six
+from db_func import get_db_connection, fetch_all_btc_four_six
 
 # --- 페이지 및 환경 설정 ---
 st.set_page_config(layout="wide")
 st.title("모델별 예측 결과 시각화 대시보드")
 
 # 환경 변수에서 서버 주소 가져오기 (없으면 기본값 사용)
-MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 INFERENCE_SERVER_URL = os.environ.get("INFERENCE_SERVER_URL", "http://localhost:8000")
 REGISTERED_MODEL_NAME = "BTC_LSTM_Production"
 
@@ -23,27 +21,30 @@ st.sidebar.title("📈 모델 예측 제어")
 
 @st.cache_data(ttl=60) # 1분마다 캐시 갱신
 def get_model_aliases():
-    """MLflow에서 모델 별칭 목록을 가져옵니다."""
+    """DB에서 직접 모델 별칭 목록을 가져옵니다."""
     try:
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        client = mlflow.tracking.MlflowClient()
-        versions = client.get_registered_model(REGISTERED_MODEL_NAME).latest_versions
-        aliases = set()
-        for v in versions:
-            for alias in v.aliases:
-                aliases.add(alias)
+        # DB에서 직접 별칭을 조회하는 SQL 쿼리
+        query = f"SELECT alias FROM registered_model_aliases WHERE name = '{REGISTERED_MODEL_NAME}' ORDER BY alias DESC"
+        with get_db_connection() as conn:
+            df = pd.read_sql_query(query, conn)
+        
+        aliases = df['alias'].tolist()
+
         if not aliases:
             st.sidebar.warning("등록된 모델 별칭이 없습니다.")
-            return ["20250531"] # 샘플 데이터용 기본 별칭
-        return sorted(list(aliases), reverse=True)
-    except Exception:
-        st.sidebar.error("MLflow 서버에 연결할 수 없습니다.")
-        return ["20250531"] # 샘플 데이터용 기본 별칭
+            return ["backtest_20250531"] # 샘플 데이터용 기본 별칭
+        return aliases
+    except Exception as e:
+        st.sidebar.error(f"DB 연결 실패: {e}")
+        # DB 연결 실패 시에도 샘플 별칭을 반환하여 앱이 멈추지 않도록 함
+        return ["backtest_20250531"]
 
 model_aliases = get_model_aliases()
+model_aliases_prefix = list(map(lambda x: x.removeprefix('backtest_'), model_aliases))
+
 selected_alias = st.sidebar.selectbox(
     "예측 기준 모델(Alias)을 선택하세요:",
-    model_aliases,
+    model_aliases_prefix,
     help="이 모델이 학습된 날짜 이후의 기간을 예측합니다."
 )
 
@@ -55,7 +56,6 @@ predict_button = st.sidebar.button(
 clear_button = st.sidebar.button("예측 결과 모두 지우기")
 
 st.sidebar.markdown("--- ")
-st.sidebar.info(f"**MLflow 서버:** `{MLFLOW_TRACKING_URI}`")
 st.sidebar.info(f"**추론 서버:** `{INFERENCE_SERVER_URL}`")
 
 # --- 메인 대시보드 ---
@@ -76,13 +76,18 @@ if clear_button:
 if predict_button:
     with st.spinner(f"'{selected_alias}' 모델 기준으로 예측을 생성합니다..."):
         try:
+            # 1. 별칭에서 'backtest_' 접두사를 제거하고 날짜 부분만 추출
             start_date_str = datetime.strptime(selected_alias, '%Y%m%d').strftime('%Y-%m-%d')
+            
+            # 2. 추론 서버에 예측 요청 (새로운 API 가상)
             api_endpoint = f"{INFERENCE_SERVER_URL}/predict_range"
             payload = {"start_date": start_date_str}
             response = requests.post(api_endpoint, json=payload, timeout=120)
             response.raise_for_status()
+            
             pred_data = response.json()
             
+            # 3. 결과 데이터프레임 생성
             pred_start_date = pd.to_datetime(pred_data['start_date'])
             pred_dates = [pred_start_date + timedelta(days=i) for i in range(len(pred_data['predictions']))]
             prediction_df = pd.DataFrame({
@@ -96,7 +101,9 @@ if predict_button:
         except (requests.exceptions.RequestException, KeyError) as e:
             st.warning(f"API 호출 실패 ({e}). 샘플 예측 데이터를 표시합니다.")
             try:
-                prediction_start_date = datetime.strptime(selected_alias, '%Y%m%d') + timedelta(days=1)
+                # 별칭에서 날짜 부분 추출
+                date_part = selected_alias.replace("backtest_", "")
+                prediction_start_date = datetime.strptime(date_part, '%Y%m%d') + timedelta(days=1)
                 last_data_date = ohlcv_df['datetime'].max()
                 if prediction_start_date <= last_data_date:
                     date_range = pd.date_range(start=prediction_start_date, end=last_data_date)

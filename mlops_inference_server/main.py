@@ -28,26 +28,17 @@ MODEL_ALIAS = os.getenv("MODEL_ALIAS", "staging")
 SEQ_LEN_REQUIRED = int(os.getenv("SEQ_LEN_REQUIRED", "12"))
 N_FEATURES_REQUIRED = int(os.getenv("N_FEATURES_REQUIRED", "18"))
 # 예측에 사용할 피처들의 컬럼 이름을 리스트로 관리하는 것이 좋습니다.
-FEATURE_COLUMNS = [f'feature_{i}' for i in range(N_FEATURES_REQUIRED)]
+# FEATURE_COLUMNS = [f'feature_{i}' for i in range(N_FEATURES_REQUIRED)]
+FEATURE_COLUMNS = [
+    'btc_open', 'btc_high', 'btc_low', 'btc_close', 'btc_volume',
+    'ndx_open', 'ndx_high', 'ndx_low', 'ndx_close',
+    'vix_open', 'vix_high', 'vix_low', 'vix_close',
+    'gold_open', 'gold_high', 'gold_low', 'gold_close', 'gold_volume'
+]
+
 # ---- MLflow 설정 ----
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-<<<<<<< HEAD
-ml_client = MlflowClient()
-
-# ---- MinIO 클라이언트 ----
-logger.info(f"Initializing Minio client with endpoint: {MINIO_ENDPOINT}, secure: {MINIO_SECURE}")
-minio_client = Minio(
-    MINIO_ENDPOINT,
-    access_key=MINIO_ACCESS_KEY,
-    secret_key=MINIO_SECRET_KEY,
-    secure=MINIO_SECURE,
-)
-
-app = FastAPI(title="LSTM Inference via MLflow+MinIO", version="1.0.0")
-
-=======
 app = FastAPI(title="LSTM Inference with MLflow PyFunc", version="2.0.0")
->>>>>>> 8c31a5eb1f5f22b03063e25601884595b65a2016
 # =========================
 # 요청/응답 스키마
 # =========================
@@ -72,43 +63,6 @@ def ensure_model_ready(alias: Optional[str] = None, wait_timeout=300, retry_inte
     # 이미 로드되어 있고 같은 alias면 통과
     if getattr(app.state, "model", None) is not None and getattr(app.state, "model_alias", None) == alias:
         return
-<<<<<<< HEAD
-
-    logger.info(f"Loading model '{REGISTERED_MODEL_NAME}' with alias '{alias}'...")
-    try:
-        # Get model version info by alias
-        mv = ml_client.get_model_version_by_alias(name=REGISTERED_MODEL_NAME, alias=alias)
-        model_version = mv.version
-        model_source_uri = mv.source # This is the s3:// URI or models:/ URI from MLflow
-
-        # Use mlflow.pyfunc.load_model with the direct source URI
-        model = mlflow.pyfunc.load_model(model_source_uri)
-        app.state.model = model
-        app.state.model_alias = alias
-        logger.info(f"Model '{REGISTERED_MODEL_NAME}' (version {model_version}) loaded successfully from source URI.")
-
-        # Scalers are usually logged as artifacts alongside the model.
-        # We need to download them from the artifact URI associated with the model version.
-        # This requires getting the model version info first.
-        mv = ml_client.get_model_version_by_alias(name=REGISTERED_MODEL_NAME, alias=alias)
-        source = mv.source # This will be the s3:// URI
-        bucket, prefix = parse_s3_uri(source)
-        
-        # Download scalers to LOCAL_MODEL_DIR
-        download_prefix_from_minio(bucket, prefix, LOCAL_MODEL_DIR)
-
-        x_scaler = try_load_pickle(pathlib.Path(LOCAL_MODEL_DIR) / X_SCALER_FILENAME)
-        y_scaler = try_load_pickle(pathlib.Path(LOCAL_MODEL_DIR) / Y_SCALER_FILENAME)
-        app.state.x_scaler = x_scaler
-        app.state.y_scaler = y_scaler
-        logger.info("Scalers loaded successfully.")
-
-    except Exception as e:
-        logger.exception(f"Failed to load model '{REGISTERED_MODEL_NAME}' with alias '{alias}'.")
-        raise RuntimeError(f"모델 로드 실패: {e}") from e
-
-# 콜백 POST
-=======
     # MLflow가 Registry 조회, MinIO 다운로드, 모델 로드를 한 번에 처리합니다.
     start_time = time.time()
     model_uri = f"models:/{REGISTERED_MODEL_NAME}@{alias}"
@@ -134,7 +88,6 @@ def ensure_model_ready(alias: Optional[str] = None, wait_timeout=300, retry_inte
 # =========================
 # 콜백 유틸
 # =========================
->>>>>>> 8c31a5eb1f5f22b03063e25601884595b65a2016
 async def post_callback(url: str, payload: dict):
     timeout = httpx.Timeout(10.0, connect=5.0)
     async with httpx.AsyncClient(timeout=timeout) as client:

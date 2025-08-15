@@ -70,10 +70,7 @@ CREATE TABLE IF NOT EXISTS integrated_data (
 
 
 
-<<<<<<< HEAD
-=======
 -- 사용자 계정 생성 및 권한 부여
 -- CREATE USER 'mlops_user'@'%' IDENTIFIED BY '0000';
 CREATE USER IF NOT EXISTS 'mlops_user'@'%' IDENTIFIED BY '0000';
 GRANT ALL PRIVILEGES ON mlops_db.* TO 'mlops_user'@'%';
->>>>>>> 8c31a5eb1f5f22b03063e25601884595b65a2016

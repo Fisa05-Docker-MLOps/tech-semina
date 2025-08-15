@@ -52,6 +52,8 @@ predict_button = st.sidebar.button(
     disabled=not selected_alias
 )
 
+clear_button = st.sidebar.button("예측 결과 모두 지우기")
+
 st.sidebar.markdown("--- ")
 st.sidebar.info(f"**MLflow 서버:** `{MLFLOW_TRACKING_URI}`")
 st.sidebar.info(f"**추론 서버:** `{INFERENCE_SERVER_URL}`")
@@ -62,55 +64,54 @@ st.sidebar.info(f"**추론 서버:** `{INFERENCE_SERVER_URL}`")
 ohlcv_df = fetch_all_btc_four_six()
 ohlcv_df['datetime'] = pd.to_datetime(ohlcv_df['datetime'])
 
-# 예측 결과를 세션 상태에 저장하기 위한 초기화
-if 'prediction_df' not in st.session_state:
-    st.session_state.prediction_df = None
+# 예측 결과를 세션 상태에 저장하기 위한 초기화 (딕셔너리 형태)
+if 'predictions' not in st.session_state:
+    st.session_state.predictions = {}
 
-# 예측 버튼 로직
+# 예측 결과 지우기 버튼 로직
+if clear_button:
+    st.session_state.predictions = {}
+
+# 예측 생성 버튼 로직
 if predict_button:
     with st.spinner(f"'{selected_alias}' 모델 기준으로 예측을 생성합니다..."):
         try:
-            # 1. 별칭에서 시작 날짜 파싱
             start_date_str = datetime.strptime(selected_alias, '%Y%m%d').strftime('%Y-%m-%d')
-            
-            # 2. 추론 서버에 예측 요청 (새로운 API 가상)
             api_endpoint = f"{INFERENCE_SERVER_URL}/predict_range"
             payload = {"start_date": start_date_str}
             response = requests.post(api_endpoint, json=payload, timeout=120)
             response.raise_for_status()
-            
             pred_data = response.json()
             
-            # 3. 결과 데이터프레임 생성
             pred_start_date = pd.to_datetime(pred_data['start_date'])
             pred_dates = [pred_start_date + timedelta(days=i) for i in range(len(pred_data['predictions']))]
-            st.session_state.prediction_df = pd.DataFrame({
+            prediction_df = pd.DataFrame({
                 'datetime': pred_dates,
                 'prediction': pred_data['predictions']
             })
-            st.success("✅ 예측 성공!")
+            # 딕셔너리에 현재 예측 결과 저장
+            st.session_state.predictions[selected_alias] = prediction_df
+            st.success(f"✅ '{selected_alias}' 모델 예측 성공!")
 
         except (requests.exceptions.RequestException, KeyError) as e:
             st.warning(f"API 호출 실패 ({e}). 샘플 예측 데이터를 표시합니다.")
-            # --- 샘플 데이터 생성 로직 ---
             try:
                 prediction_start_date = datetime.strptime(selected_alias, '%Y%m%d') + timedelta(days=1)
                 last_data_date = ohlcv_df['datetime'].max()
-                if prediction_start_date > last_data_date:
-                    st.error("예측 시작일이 데이터 기간을 벗어납니다.")
-                    st.session_state.prediction_df = None
-                else:
+                if prediction_start_date <= last_data_date:
                     date_range = pd.date_range(start=prediction_start_date, end=last_data_date)
                     last_close_price = ohlcv_df[ohlcv_df['datetime'] < prediction_start_date]['btc_close'].iloc[-1]
-                    # 간단한 노이즈를 추가한 샘플 예측값 생성
                     sample_predictions = last_close_price + np.random.randn(len(date_range)).cumsum() * 50
-                    st.session_state.prediction_df = pd.DataFrame({
+                    prediction_df = pd.DataFrame({
                         'datetime': date_range,
                         'prediction': sample_predictions
                     })
+                    # 딕셔너리에 현재 예측 결과 저장
+                    st.session_state.predictions[selected_alias] = prediction_df
+                else:
+                    st.error("예측 시작일이 데이터 기간을 벗어납니다.")
             except (IndexError, ValueError):
                  st.error("샘플 데이터를 생성할 기준 날짜를 찾지 못했습니다.")
-                 st.session_state.prediction_df = None
 
 # --- 차트 그리기 ---
 fig = go.Figure()
@@ -123,16 +124,20 @@ fig.add_trace(go.Candlestick(x=ohlcv_df['datetime'],
                              close=ohlcv_df['btc_close'],
                              name='실제 가격'))
 
-# 2. 예측값이 있으면 라인 차트로 추가
-if st.session_state.prediction_df is not None:
-    pred_df = st.session_state.prediction_df
-    fig.add_trace(go.Scatter(
-        x=pred_df['datetime'],
-        y=pred_df['prediction'],
-        mode='lines',
-        line=dict(color='orange', width=3),
-        name=f'{selected_alias} 모델 예측'
-    ))
+# 2. 저장된 모든 예측값을 순회하며 라인 차트로 추가
+if st.session_state.predictions:
+    # 색상 리스트 준비
+    colors = ['orange', 'purple', 'green', 'cyan', 'magenta', 'yellow']
+    color_idx = 0
+    for alias, pred_df in st.session_state.predictions.items():
+        fig.add_trace(go.Scatter(
+            x=pred_df['datetime'],
+            y=pred_df['prediction'],
+            mode='lines',
+            line=dict(color=colors[color_idx % len(colors)], width=3),
+            name=f'{alias} 모델 예측'
+        ))
+        color_idx += 1
 
 # 차트 레이아웃
 min_price = ohlcv_df['btc_low'].min()

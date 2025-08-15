@@ -66,6 +66,6 @@ def fetch_all_btc_four_six() -> pd.DataFrame:
     return df.sort_values(by='datetime').reset_index(drop=True)
 
 if __name__ == "__main__":
-    df = fetch_all_btc("2024-02-01 00:00:00")
+    df = fetch_all_btc_four_six("2024-02-01 00:00:00")
     print(df.head(25))
     print(df.count())

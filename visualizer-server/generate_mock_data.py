@@ -7,7 +7,7 @@ date_range = pd.date_range(start="2024-02-01 00:00:00", end="2025-06-30 23:00:00
 
 # 2. 샘플 BTC 종가 생성 (임의값, 랜덤 변동)
 np.random.seed(42)  # 재현 가능
-base_price = 34500  # 시작 가격
+base_price = 105000  # 시작 가격
 prices = base_price + np.cumsum(np.random.randn(len(date_range)) * 50)  # 시간별 변동
 
 # 3. 날짜 문자열 포맷 변경

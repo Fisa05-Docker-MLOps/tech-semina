@@ -41,7 +41,7 @@ def get_db_connection():
     return connection
 
 
-def fetch_all_btc() -> pd.DataFrame:
+def fetch_all_btc_four_six() -> pd.DataFrame:
     """
     연결 된 DB에서 ohlcv 데이터를 가져오는 함수입니다.
 
@@ -55,6 +55,7 @@ def fetch_all_btc() -> pd.DataFrame:
         query_get_ohlcv = f"""
             SELECT datetime, btc_open, btc_high, btc_low, btc_close, btc_volume
             FROM {DB_NAME}.integrated_data
+            WHERE datetime BETWEEN '2025-04-01' AND '2025-06-30'
             ;
             """
         df = pd.read_sql_query(

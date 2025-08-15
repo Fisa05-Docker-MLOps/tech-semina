@@ -5,6 +5,8 @@ services:
     image: mysql:8.0
     container_name: mlflow-backend-store
     restart: always
+    ports:
+      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: mlops_db
@@ -85,21 +87,24 @@ services:
       context: ./mlflow-client
     container_name: mlops_training_client
     depends_on:
-      - mlflow-server
-      - etl-job
+      mlflow-server:
+        condition: service_started
+      etl-job:
+        condition: service_completed_successfully
     environment:
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow-server:5000
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
-      DB_HOST: mysql+pymysql://mlops_user:${MYSQL_USER_PASSWORD}@mlflow-backend-store/mlops_db?charset=utf8mb4
+      # DB_HOST: mysql+pymysql://mlops_user:${MYSQL_USER_PASSWORD}@mlflow-backend-store/mlops_db?charset=utf8mb4
+      DB_HOST: mlflow-backend-store
       DB_PORT: 3306
       DB_NAME: mlops_db
       DB_USER: mlops_user
       DB_PASSWORD: ${MYSQL_USER_PASSWORD}
 
-    command: ["python3", "module/mlflow_train.py"]
+    command: ["python3", "back_test.py"]
 
   inference-server:
     build:
@@ -115,7 +120,7 @@ services:
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow-server:5000
       REGISTERED_MODEL_NAME: BTC_LSTM_Production
-      MODEL_ALIAS: staging
+      MODEL_ALIAS: backtest_20240201
       MINIO_ENDPOINT: mlflow-artifact-store:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
@@ -128,8 +133,8 @@ services:
       Y_SCALER_FILENAME: y_scaler.pkl
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MLFLOW_S3_ENDPOINT_URL: http://mlflow-artifact-store:9000
-    command: ["python3", "start_server.py"]
+      MLFLOW_S3_ENDPOINT_URL:  http://mlflow-artifact-store:9000
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:
   db_data:

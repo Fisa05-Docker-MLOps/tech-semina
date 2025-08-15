@@ -41,7 +41,7 @@ def get_db_connection():
     return connection
 
 
-def get_ohlcv(base_datetime: str) -> pd.DataFrame:
+def fetch_all_btc() -> pd.DataFrame:
     """
     연결 된 DB에서 ohlcv 데이터를 가져오는 함수입니다.
 
@@ -53,14 +53,18 @@ def get_ohlcv(base_datetime: str) -> pd.DataFrame:
 
     with get_db_connection() as conn:
         query_get_ohlcv = f"""
-            SELECT *
+            SELECT datetime, btc_open, btc_high, btc_low, btc_close, btc_volume
             FROM {DB_NAME}.integrated_data
-            WHERE datetime BETWEEN DATE_SUB(%s, INTERVAL 1 MONTH) AND %s;
+            ;
             """
         df = pd.read_sql_query(
             query_get_ohlcv,
-            conn,
-            params=[base_datetime, base_datetime]
+            conn
         )
 
     return df.sort_values(by='datetime').reset_index(drop=True)
+
+if __name__ == "__main__":
+    df = fetch_all_btc("2024-02-01 00:00:00")
+    print(df.head(25))
+    print(df.count())

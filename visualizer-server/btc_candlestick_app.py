@@ -88,16 +88,12 @@ if champion_button:
     with st.spinner("Champion 모델로 예측을 생성합니다..."):
         try:
             api_endpoint = f"{INFERENCE_SERVER_URL}/predict-champion"
-            response = requests.get(api_endpoint, timeout=300)  # GET 요청
+            response = requests.get(api_endpoint, timeout=300)
             response.raise_for_status()
             pred_data = response.json()
 
-            pred_start_date = pd.to_datetime(pred_data['start_date'])
-            pred_dates = pd.date_range(start=pred_start_date, periods=len(pred_data['predictions']), freq='h')
-            prediction_df = pd.DataFrame({
-                'datetime': pred_dates,
-                'prediction': pred_data['predictions']
-            })
+            # JSON 그대로 DataFrame으로 변환
+            prediction_df = pd.DataFrame(pred_data['predictions'])  # already has 'datetime' & 'prediction'
 
             st.session_state.predictions["champion_model"] = prediction_df
             st.success("✅ Champion 모델 예측 성공!")
@@ -105,40 +101,33 @@ if champion_button:
         except Exception as e:
             st.error(f"Champion 예측 호출 실패: {e}")
 
-# 예측 생성 버튼 로직
 if predict_button:
     with st.spinner(f"'{selected_alias}' 모델 기준으로 예측을 생성합니다..."):
         try:
-            # 1. 날짜 부분만 추출
-            start_date_str = datetime.strptime(selected_alias, '%Y%m%d').strftime('%Y-%m-%d')
-
-            # 우선 model 리로드
-            api_endpoint = f"{INFERENCE_SERVER_URL}/reload?alias={selected_alias}"
-            reload_response = requests.post(api_endpoint, timeout=120)
+            # 모델 리로드
+            reload_endpoint = f"{INFERENCE_SERVER_URL}/reload?alias={selected_alias}"
+            requests.post(reload_endpoint, timeout=120).raise_for_status()
             time.sleep(5)
-            
-            # 2. 추론 서버에 예측 요청 (새로운 API 가상)
-            api_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={selected_alias}"
-            response = requests.post(api_endpoint, timeout=120)
+
+            # 예측 요청
+            predict_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={selected_alias}"
+            response = requests.post(predict_endpoint, timeout=120)
             response.raise_for_status()
-            
             pred_data = response.json()
-            
-            # 3. 결과 데이터프레임 생성
-            pred_start_date = pd.to_datetime(pred_data['start_date'])
-            pred_dates = pd.date_range(start=pred_start_date, periods=len(pred_data['predictions']), freq='h')
-            prediction_df = pd.DataFrame({
-                'datetime': pred_dates,
-                'prediction': pred_data['predictions']
-            })
 
-            # --- ohlcv_df 마지막 날짜까지만 남기기 ---
+            # JSON 그대로 DataFrame으로 변환
+            prediction_df = pd.DataFrame(pred_data['predictions'])  # already has 'datetime' & 'prediction'
+
+            # 'datetime' 컬럼을 datetime 타입으로 변환
+            prediction_df['datetime'] = pd.to_datetime(prediction_df['datetime'])
+
+            # ohlcv_df 마지막 날짜까지만 필터링
             last_data_date = ohlcv_df['datetime'].max()
-            prediction_df = prediction_df[prediction_df['datetime'] <= last_data_date]
+            prediction_df = prediction_df[prediction_df['datetime'] <= last_data_date].reset_index(drop=True)
 
-            # 딕셔너리에 현재 예측 결과 저장
+            # 세션 상태 저장
             st.session_state.predictions[selected_alias] = prediction_df
-            st.success(f"✅ '{selected_alias}' 모델 예측 성공!")
+            st.success(f"✅ '{selected_alias}' 모델 예측 완료! (총 {len(prediction_df)}시간 예측)")
 
         except (requests.exceptions.RequestException, KeyError) as e:
             st.warning(f"API 호출 실패 ({e})")

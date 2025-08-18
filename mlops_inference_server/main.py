@@ -158,103 +158,114 @@ def reload_model(alias: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"모델 리로드 실패: {e}")
 
+def run_prediction(df: pd.DataFrame, model, seq_len: int, feature_columns: list) -> pd.DataFrame:
+    """
+    주어진 DataFrame과 모델로 슬라이딩 윈도우 예측 수행.
+    반환: datetime + prediction DataFrame
+    """
+    predictions_list = []
+
+    for i in range(seq_len, len(df) + 1):
+        X_df = df[feature_columns].iloc[i - seq_len:i]
+        try:
+            y_pred = model.predict(X_df)
+            predictions_list.append({
+                "datetime": df.index[i - 1],
+                "prediction": float(y_pred.tolist()[0])
+            })
+        except Exception:
+            predictions_list.append({
+                "datetime": df.index[i - 1],
+                "prediction": None
+            })
+
+    return pd.DataFrame(predictions_list).reset_index(drop=True)
+
 
 @app.post("/predict")
 def predict_batch(alias: str):
+    """
+    단일 alias 예측. datetime 포함 결과 반환.
+    """
     if getattr(app.state, "model", None) is None:
         raise HTTPException(status_code=503, detail="모델이 로드되지 않았습니다. /reload 필요")
-    
-    model = app.state.model  # PyFunc 모델
-    
-    # alias에서 시작일 추출
-    start_date = f"{alias[:4]}-{alias[4:6]}-{alias[6:]} 00:00:00"
-    
-    # features 가져오기
-    df = fetch_all_features(start_date)
-    if len(df) < SEQ_LEN:
-        raise HTTPException(status_code=400, detail=f"{start_date} 이후 데이터가 시퀀스 길이보다 부족합니다.")
-    
-    # 슬라이딩 윈도우로 배치 생성
-    sequences = [df[FEATURE_COLUMNS].iloc[i:i+SEQ_LEN].to_dict(orient='records') 
-                 for i in range(len(df)-SEQ_LEN+1)]
-    
-    # pyfunc 모델은 DataFrame 입력 사용
-    X_df = pd.DataFrame([item for seq in sequences for item in seq])
-    
+
     try:
-        y_pred = model.predict(X_df)  # PyFunc predict 사용
-        predictions = y_pred.tolist()
+        model = app.state.model
+        start_date = datetime.strptime(alias, "%Y%m%d")
+
+        df = fetch_all_features(start_date.strftime("%Y-%m-%d %H:%M:%S"))
+        if len(df) < SEQ_LEN:
+            raise HTTPException(status_code=400, detail=f"{start_date} 이후 데이터 부족")
+
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        df = df.sort_values("datetime").set_index("datetime")
+
+        prediction_df = run_prediction(df, model, SEQ_LEN, FEATURE_COLUMNS)
+
+        return {
+            "start_date": start_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "predictions": prediction_df.to_dict(orient="records")
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"예측 실패: {e}")
-    
-    return {
-        "start_date": start_date,
-        "predictions": predictions
-    }
+
 
 @app.get("/predict-champion")
 def predict_champion():
     """
-    2025년 상반기 백테스팅 기간 동안,
-    매주 최신 모델(alias)로 시간 단위 예측을 수행합니다.
-    마지막 alias 구간은 /predict와 동일하게 끝까지 예측 생성.
+    여러 alias를 순차적으로 예측하고, 마지막 alias는 끝까지 예측.
+    datetime + prediction 포함 DataFrame 반환.
     """
     try:
-        # 1. 전체 피처 가져오기 (SEQ_LEN만큼 과거 포함)
         df_all = fetch_all_features(start_date="2024-12-01 00:00:00")
         if df_all.empty or len(df_all) < SEQ_LEN:
-            raise HTTPException(status_code=400, detail="데이터가 부족합니다.")
+            raise HTTPException(status_code=400, detail="데이터 부족")
 
-        # datetime 설정
         df_all["datetime"] = pd.to_datetime(df_all["datetime"])
         df_all = df_all.sort_values("datetime").set_index("datetime")
 
-        # 2. alias 리스트 가져오기 (DB에서)
         aliases = get_model_aliases_asc()
-        aliases.sort()  # 날짜 순 정렬
-
-        # 3. 시작 alias 지정
+        aliases.sort()
         start_alias = "backtest_20250327"
         if start_alias not in aliases:
             raise HTTPException(status_code=400, detail=f"start_alias {start_alias} 존재하지 않음")
 
-        start_idx = aliases.index(start_alias)
-        aliases = aliases[start_idx:]  # 시작 alias 이전 제거
-
+        aliases = aliases[aliases.index(start_alias):]
         all_predictions = []
 
         for i, alias in enumerate(aliases):
             logger.info(f"예측 시작 alias: {alias}")
+
+            ensure_model_ready(alias=alias)
+            model = app.state.model
 
             alias_start = datetime.strptime(alias.replace("backtest_", ""), "%Y%m%d")
             if i < len(aliases) - 1:
                 next_alias_start = datetime.strptime(aliases[i + 1].replace("backtest_", ""), "%Y%m%d")
                 alias_end = next_alias_start - timedelta(seconds=1)
             else:
-                alias_end = df_all.index.max()  # 마지막 alias는 끝까지
+                alias_end = df_all.index.max()
 
             df_slice = df_all.loc[alias_start:alias_end]
             if df_slice.empty:
                 logger.warning(f"{alias} 구간 데이터 없음, 건너뜀")
                 continue
 
-            ensure_model_ready(alias=alias)
-            model = app.state.model
+            slice_predictions = run_prediction(df_slice, model, SEQ_LEN, FEATURE_COLUMNS)
+            all_predictions.append(slice_predictions)
 
-            # 슬라이딩 윈도우
-            for j in range(SEQ_LEN, len(df_slice)+1):
-                X_df = df_slice[FEATURE_COLUMNS].iloc[j-SEQ_LEN:j]
-                try:
-                    y_pred = model.predict(X_df)
-                    all_predictions.append(float(y_pred.tolist()[0]))
-                except Exception:
-                    all_predictions.append(None)
+            logger.info(f"{alias} 구간 예측 완료, 누적 예측 수: {sum(len(df) for df in all_predictions)}")
 
-            logger.info(f"{alias} 구간 예측 완료, 총 예측값 누적: {len(all_predictions)}")
+        if all_predictions:
+            final_df = pd.concat(all_predictions).reset_index(drop=True)
+        else:
+            final_df = pd.DataFrame(columns=["datetime", "prediction"])
 
         return {
             "start_date": "2025-03-27 00:00:00",
-            "predictions": all_predictions
+            "predictions": final_df.to_dict(orient="records")
         }
 
     except Exception as e:

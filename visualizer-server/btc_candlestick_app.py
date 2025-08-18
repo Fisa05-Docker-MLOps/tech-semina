@@ -6,7 +6,6 @@ import numpy as np
 from datetime import datetime, timedelta
 import requests
 import os
-from db_func import get_db_connection, fetch_all_btc_four_six
 
 # --- 페이지 및 환경 설정 ---
 st.set_page_config(layout="wide")
@@ -21,14 +20,15 @@ st.sidebar.title("📈 모델 예측 제어")
 
 @st.cache_data(ttl=60) # 1분마다 캐시 갱신
 def get_model_aliases():
-    """DB에서 직접 모델 별칭 목록을 가져옵니다."""
+    """ GET '/aliases' api로 alias 가져오기 """
     try:
-        # DB에서 직접 별칭을 조회하는 SQL 쿼리
-        query = f"SELECT alias FROM registered_model_aliases WHERE name = '{REGISTERED_MODEL_NAME}' ORDER BY alias DESC"
-        with get_db_connection() as conn:
-            df = pd.read_sql_query(query, conn)
+        # api에서 가져오는 로직
+        # 추론 서버에 alias 요청
+        api_endpoint = f"{INFERENCE_SERVER_URL}/aliases"
+        response = requests.get(api_endpoint, timeout=120)
+        response.raise_for_status()
         
-        aliases = df['alias'].tolist()
+        aliases = response.json()
 
         if not aliases:
             st.sidebar.warning("등록된 모델 별칭이 없습니다.")
@@ -60,8 +60,15 @@ st.sidebar.info(f"**추론 서버:** `{INFERENCE_SERVER_URL}`")
 
 # --- 메인 대시보드 ---
 
-# DB에서 데이터 가져오기
-ohlcv_df = fetch_all_btc_four_six()
+# 추론 서버에서 데이터 가져오기
+
+# api에서 가져오는 로직
+# 추론 서버에 alias 요청
+api_endpoint = f"{INFERENCE_SERVER_URL}/btc-info"
+btc_response = requests.get(api_endpoint, timeout=120)
+
+ohlcv_data = btc_response.json()
+ohlcv_df = pd.DataFrame(ohlcv_data)
 ohlcv_df['datetime'] = pd.to_datetime(ohlcv_df['datetime'])
 
 # 예측 결과를 세션 상태에 저장하기 위한 초기화 (딕셔너리 형태)
@@ -76,11 +83,11 @@ if clear_button:
 if predict_button:
     with st.spinner(f"'{selected_alias}' 모델 기준으로 예측을 생성합니다..."):
         try:
-            # 1. 별칭에서 'backtest_' 접두사를 제거하고 날짜 부분만 추출
+            # 1. 날짜 부분만 추출
             start_date_str = datetime.strptime(selected_alias, '%Y%m%d').strftime('%Y-%m-%d')
             
             # 2. 추론 서버에 예측 요청 (새로운 API 가상)
-            api_endpoint = f"{INFERENCE_SERVER_URL}/predict_range"
+            api_endpoint = f"{INFERENCE_SERVER_URL}/predict"
             payload = {"start_date": start_date_str}
             response = requests.post(api_endpoint, json=payload, timeout=120)
             response.raise_for_status()

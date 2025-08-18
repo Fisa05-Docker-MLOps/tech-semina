@@ -12,7 +12,7 @@ import mlflow
 import time
 from mlflow.exceptions import RestException
 from utils import setup_logger
-from db import fetch_all_btc_four_six, get_model_aliases
+from db import fetch_all_btc_four_six, get_model_aliases, fetch_all_features
 from datetime import datetime
 
 
@@ -46,6 +46,18 @@ app = FastAPI(title="LSTM Inference with MLflow PyFunc", version="2.0.0")
 # =========================
 # 요청/응답 스키마
 # =========================
+class PredictPayload(BaseModel):
+    # 단일 시퀀스 2D: [T, F]
+    X: List[List[float]] = Field(..., description="[T,F] 형식의 입력 데이터")
+    callback_url: Optional[HttpUrl] = None
+    metadata: Optional[dict] = None
+class PredictResponse(BaseModel):
+    pred_btc_close_next: float
+    # pyfunc 모델은 입력의 원본 값을 알 수 없으므로, 필요하다면 클라이언트가 직접 계산해야 합니다.
+    # actual_btc_close_last: float
+    posted_to_callback: bool
+    model_alias: str
+    model_version: str
 
 
 
@@ -146,6 +158,7 @@ def reload_model(alias: Optional[str] = None):
         app.state.model = None
         app.state.model_alias = None
         app.state.model_version = None
+        alias = 'backtest_' + alias
         ensure_model_ready(alias or MODEL_ALIAS)
         return {
             "status": "reloaded",
@@ -155,44 +168,37 @@ def reload_model(alias: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"모델 리로드 실패: {e}")
 
-
-@app.post("/predict", response_model=PredictResponse)
-async def predict(req: PredictPayload, tasks: BackgroundTasks):
+@app.post("/predict")
+async def predict(req: PredictPayload):
     if getattr(app.state, "model", None) is None:
         raise HTTPException(status_code=503, detail="모델이 로드되지 않았습니다. /reload를 시도하세요.")
     model = app.state.model
+
     try:
-        # 입력 데이터를 pandas DataFrame으로 변환
-        x_df = pd.DataFrame(req.X, columns=FEATURE_COLUMNS)
-        # pyfunc 모델은 전/후처리 로직을 내장하고 있음
-        prediction = model.predict(x_df)
-        pred_next_close = float(prediction[0])
+        # alias에서 시작일 추출
+        start_date = app.state.model_alias.replace("backtest_", "")
+        start_date = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]} 00:00:00"
+
+        # features 가져오기
+        df = fetch_all_features(start_date)
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"{start_date} 이후 데이터가 없습니다.")
+
+        # 순차 예측
+        predictions = []
+        for i in range(len(df)):
+            x_df = pd.DataFrame([df.loc[i, FEATURE_COLUMNS].tolist()], columns=FEATURE_COLUMNS)
+            pred = float(model.predict(x_df)[0])
+            predictions.append(pred)
+
+        return {
+            "start_date": start_date,
+            "predictions": predictions
+        }
+
     except Exception as e:
         logger.exception("예측 실패")
         raise HTTPException(status_code=400, detail=f"예측 실패: {e}")
-    # ---- 콜백 전송(옵션) ----
-    posted = False
-    if req.callback_url:
-        payload = {
-            "pred_btc_close_next": pred_next_close,
-            "metadata": req.metadata,
-            "model_alias": app.state.model_alias,
-            "model_version": app.state.model_version,
-        }
-        async def _send():
-            try:
-                await post_callback(str(req.callback_url), payload)
-                logger.info(f"콜백 전송 성공 -> {req.callback_url}")
-            except Exception as e:
-                logger.error(f"콜백 전송 실패 -> {req.callback_url}: {e}")
-        tasks.add_task(_send)
-        posted = True
-    return PredictResponse(
-        pred_btc_close_next=pred_next_close,
-        posted_to_callback=posted,
-        model_alias=app.state.model_alias,
-        model_version=app.state.model_version,
-    )
 
 
 @app.get("/aliases")
@@ -202,27 +208,29 @@ def give_aliases():
     '''
     try:
         alias_list = get_model_aliases()
-        logger.log(msg="aliases 키로 alias list 전송")
+        logger.info(msg="aliases 키로 alias list 전송")
         return {"aliases": alias_list}
     except Exception as e:
         logger.error(msg=f"데이터베이스로부터 모델 alias를 불러오는데 실패했습니다 {e}")
 
 
-@app.get("/btc-info")
+@app.get("/btc-info", response_model=btc_info_response)
 def give_btc_info():
     '''
     2025.04 ~ 2025.06 기간의 btc 정보를 반환하는 api
     '''
     try:
         btc_df = fetch_all_btc_four_six()
-        logger.log(msg="btc 정보 전송")
-        return_dict = {}
-        return_dict[datetime] = btc_df[datetime].tolist()
-        return_dict['btc_open'] = btc_df['btc_open'].tolist()
-        return_dict['btc_high'] = btc_df['btc_high'].tolist() 
-        return_dict['btc_low'] = btc_df['btc_low'].tolist()
-        return_dict['btc_close'] = btc_df['btc_close'].tolist()
-        return_dict['btc_volume'] = btc_df['btc_volume'].tolist()
-        return return_dict
+        logger.info(msg="btc 정보 전송")
+
+        return {
+            "datetime": btc_df["datetime"].tolist(),
+            "btc_open": btc_df["btc_open"].tolist(),
+            "btc_high": btc_df["btc_high"].tolist(),
+            "btc_low": btc_df["btc_low"].tolist(),
+            "btc_close": btc_df["btc_close"].tolist(),
+            "btc_volume": btc_df["btc_volume"].tolist(),
+        }
     except Exception as e:
-        logger.error(msg=f"데이터베이스로부터 모델 alias를 불러오는데 실패했습니다 {e}")
+        logger.error(msg=f"데이터베이스로부터 btc 정보를 불러오는데 실패했습니다 {e}")
+        raise HTTPException(status_code=500, detail=f"btc 정보 조회 실패: {e}")

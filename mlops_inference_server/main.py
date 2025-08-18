@@ -1,6 +1,5 @@
 import os
 import pathlib
-import logging
 from typing import List, Optional, Union
 import numpy as np
 import pandas as pd
@@ -12,9 +11,12 @@ import joblib
 import mlflow
 import time
 from mlflow.exceptions import RestException
+from utils import setup_logger
+from db import fetch_all_btc_four_six, get_model_aliases
+
 
 # ---- 로그 ----
-logger = logging.getLogger("uvicorn.error")
+logger = setup_logger(name="uvicorn.error")
 # ---- 환경변수 ----
 # MLflow가 MinIO에 접근하기 위해 필요한 환경변수들입니다.
 # os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
@@ -39,21 +41,20 @@ FEATURE_COLUMNS = [
 # ---- MLflow 설정 ----
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 app = FastAPI(title="LSTM Inference with MLflow PyFunc", version="2.0.0")
+
 # =========================
 # 요청/응답 스키마
 # =========================
-class PredictPayload(BaseModel):
-    # 단일 시퀀스 2D: [T, F]
-    X: List[List[float]] = Field(..., description="[T,F] 형식의 입력 데이터")
-    callback_url: Optional[HttpUrl] = None
-    metadata: Optional[dict] = None
-class PredictResponse(BaseModel):
-    pred_btc_close_next: float
-    # pyfunc 모델은 입력의 원본 값을 알 수 없으므로, 필요하다면 클라이언트가 직접 계산해야 합니다.
-    # actual_btc_close_last: float
-    posted_to_callback: bool
-    model_alias: str
-    model_version: str
+
+
+
+class alias_response(BaseModel):
+    aliases: List[str]
+
+
+class predict_date_response(BaseModel):
+    prediction: List[float]
+
 # =========================
 # 모델 및 상태 관리
 # =========================
@@ -85,6 +86,8 @@ def ensure_model_ready(alias: Optional[str] = None, wait_timeout=300, retry_inte
             else:
                 logger.exception("MLflow 모델 로드 실패")
                 raise RuntimeError(f"모델 로드 실패: {e}") from e
+
+
 # =========================
 # 콜백 유틸
 # =========================
@@ -94,17 +97,27 @@ async def post_callback(url: str, payload: dict):
         r = await client.post(url, json=payload)
         r.raise_for_status()
         return r.status_code
+
+
 # =========================
 # 라우트 (Routes)
 # =========================
 @app.on_event("startup")
 def _startup():
+    '''
+    서버 시작시 모델을 요청하는 메서드
+    '''
     try:
         ensure_model_ready(MODEL_ALIAS)
     except Exception as e:
         logger.error(f"초기 모델 로드 실패: {e}")
+
+
 @app.get("/health")
 def health():
+    '''
+    서버 상태 체크에 쓰이는 함수
+    '''
     model = getattr(app.state, "model", None)
     return {
         "status": "ok",
@@ -112,8 +125,13 @@ def health():
         "model_alias": getattr(app.state, "model_alias", None),
         "model_version": getattr(app.state, "model_version", None),
     }
+
+
 @app.post("/reload")
 def reload_model(alias: Optional[str] = None):
+    '''
+    새로운 모델을 설정하기 위해 쓰이는 함수
+    '''
     try:
         # app.state를 초기화하여 새로운 모델을 로드하도록 강제
         app.state.model = None
@@ -127,6 +145,8 @@ def reload_model(alias: Optional[str] = None):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"모델 리로드 실패: {e}")
+
+
 @app.post("/predict", response_model=PredictResponse)
 async def predict(req: PredictPayload, tasks: BackgroundTasks):
     if getattr(app.state, "model", None) is None:
@@ -164,3 +184,13 @@ async def predict(req: PredictPayload, tasks: BackgroundTasks):
         model_alias=app.state.model_alias,
         model_version=app.state.model_version,
     )
+
+
+@app.get("/aliases")
+def give_aliases():
+    try:
+        alias_list = get_model_aliases()
+        logger.log(msg="aliases 키로 alias list 전송")
+        return {"aliases": alias_list}
+    except Exception as e:
+        logger.error(msg=f"데이터베이스로부터 모델 alias를 불러오는데 실패했습니다 {e}")

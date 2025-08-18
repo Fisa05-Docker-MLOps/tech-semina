@@ -13,8 +13,8 @@ import mlflow
 import time
 from mlflow.exceptions import RestException
 from utils import setup_logger
-from db import fetch_all_btc_four_six, get_model_aliases, fetch_all_features
-from datetime import datetime
+from db import fetch_all_btc_four_six, get_model_aliases, fetch_all_features, get_model_aliases_asc
+from datetime import datetime, timedelta
 
 
 # ---- 로그 ----
@@ -39,6 +39,7 @@ FEATURE_COLUMNS = [
     'vix_open', 'vix_high', 'vix_low', 'vix_close',
     'gold_open', 'gold_high', 'gold_low', 'gold_close', 'gold_volume'
 ]
+SEQ_LEN = 12
 
 # ---- MLflow 설정 ----
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
@@ -170,7 +171,6 @@ def predict_batch(alias: str):
     
     # features 가져오기
     df = fetch_all_features(start_date)
-    SEQ_LEN = 12
     if len(df) < SEQ_LEN:
         raise HTTPException(status_code=400, detail=f"{start_date} 이후 데이터가 시퀀스 길이보다 부족합니다.")
     
@@ -179,7 +179,6 @@ def predict_batch(alias: str):
                  for i in range(len(df)-SEQ_LEN+1)]
     
     # pyfunc 모델은 DataFrame 입력 사용
-    import pandas as pd
     X_df = pd.DataFrame([item for seq in sequences for item in seq])
     
     try:
@@ -192,7 +191,6 @@ def predict_batch(alias: str):
         "start_date": start_date,
         "predictions": predictions
     }
-
 
 @app.get("/aliases")
 def give_aliases():

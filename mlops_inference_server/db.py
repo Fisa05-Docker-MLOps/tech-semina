@@ -102,6 +102,25 @@ def get_model_aliases():
         return ["backtest_20250531"]
 
 
+def get_model_aliases_asc():
+    """DB에서 직접 모델 별칭 목록을 가져옵니다."""
+    try:
+        # DB에서 직접 별칭을 조회하는 SQL 쿼리
+        query = f"SELECT alias FROM registered_model_aliases WHERE name = '{REGISTERED_MODEL_NAME}' ORDER BY alias ASC"
+        with get_db_connection() as conn:
+            df = pd.read_sql_query(query, conn)
+        
+        aliases = df['alias'].tolist()
+
+        if not aliases:
+            logger.info(msg="등록된 모델 별칭이 없습니다.")
+            return ["backtest_20250531"] # 샘플 데이터용 기본 별칭
+        return aliases
+    except Exception as e:
+        logger.error(f"DB 연결 실패: {e}")
+        return ["backtest_20250531"]
+
+
 def fetch_all_features(start_date: str) -> pd.DataFrame:
     """
     연결된 DB에서 feature 데이터를 가져오는 함수

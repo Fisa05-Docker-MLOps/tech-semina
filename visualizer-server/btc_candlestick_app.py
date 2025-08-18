@@ -43,6 +43,9 @@ def get_model_aliases():
 model_aliases = get_model_aliases().get("aliases", [])
 model_aliases_prefix = list(map(lambda x: x.removeprefix('backtest_'), model_aliases))
 
+# 챔피언 모델의 예측치 보여주는 버튼
+champion_button = st.sidebar.button("Champion Model 예측")
+
 selected_alias = st.sidebar.selectbox(
     "예측 기준 모델(Alias)을 선택하세요:",
     model_aliases_prefix,
@@ -80,6 +83,55 @@ if 'predictions' not in st.session_state:
 if clear_button:
     st.session_state.predictions = {}
 
+# 챔피언 예측 생성 로직
+if champion_button:
+    with st.spinner("Champion 모델로 예측을 생성합니다..."):
+        try:
+            sorted_model_aliases_prefix = sorted(model_aliases_prefix)
+            start_idx = sorted_model_aliases_prefix.index('20250327')
+            new_alias_list = sorted_model_aliases_prefix[start_idx:]
+
+            all_predictions = []
+
+            for alias in new_alias_list:
+                try:
+                    # 1. 모델 리로드
+                    reload_endpoint = f"{INFERENCE_SERVER_URL}/reload?alias={alias}"
+                    reload_response = requests.post(reload_endpoint, timeout=300)
+                    reload_response.raise_for_status()
+
+                    # 2. 예측 요청
+                    predict_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={alias}"
+                    response = requests.post(predict_endpoint, timeout=300)
+                    response.raise_for_status()
+                    pred_data = response.json()
+
+                    # 3. 전체 예측 DataFrame
+                    pred_start_date = pd.to_datetime(pred_data['start_date'])
+                    pred_dates = pd.date_range(start=pred_start_date, periods=len(pred_data['predictions']), freq='h')
+                    prediction_df = pd.DataFrame({
+                        'datetime': pred_dates,
+                        'prediction': pred_data['predictions']
+                    })
+
+                    # 4. 168시간 extend
+                    slice_df = prediction_df.iloc[0:168]
+                    all_predictions.append(slice_df)
+
+                    st.success(f"✅ {alias} 예측 완료")
+
+                except Exception as e:
+                    st.error(f"Champion 예측 호출 실패 (alias={alias}): {e}")
+
+            # 5. 전체 예측 누적
+            if all_predictions:
+                final_df = pd.concat(all_predictions).reset_index(drop=True)
+                st.session_state.predictions["champion_model"] = final_df
+                st.success("✅ 모든 Champion 예측 완료!")
+
+        except Exception as e:
+            st.error(f"Champion 예측 전체 과정 실패: {e}")
+
 # 예측 생성 버튼 로직
 if predict_button:
     with st.spinner(f"'{selected_alias}' 모델 기준으로 예측을 생성합니다..."):
@@ -92,7 +144,7 @@ if predict_button:
             reload_response = requests.post(api_endpoint, timeout=120)
             time.sleep(5)
             
-            # 2. 추론 서버에 예측 요청 (새로운 API 가상)
+            # 2. 추론 서버에 예측 요청
             api_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={selected_alias}"
             response = requests.post(api_endpoint, timeout=120)
             response.raise_for_status()
@@ -116,26 +168,7 @@ if predict_button:
             st.success(f"✅ '{selected_alias}' 모델 예측 성공!")
 
         except (requests.exceptions.RequestException, KeyError) as e:
-            st.warning(f"API 호출 실패 ({e}). 샘플 예측 데이터를 표시합니다.")
-            try:
-                # 별칭에서 날짜 부분 추출
-                date_part = selected_alias.replace("backtest_", "")
-                prediction_start_date = datetime.strptime(date_part, '%Y%m%d') + timedelta(days=1)
-                last_data_date = ohlcv_df['datetime'].max()
-                if prediction_start_date <= last_data_date:
-                    date_range = pd.date_range(start=prediction_start_date, end=last_data_date)
-                    last_close_price = ohlcv_df[ohlcv_df['datetime'] < prediction_start_date]['btc_close'].iloc[-1]
-                    sample_predictions = last_close_price + np.random.randn(len(date_range)).cumsum() * 50
-                    prediction_df = pd.DataFrame({
-                        'datetime': date_range,
-                        'prediction': sample_predictions
-                    })
-                    # 딕셔너리에 현재 예측 결과 저장
-                    st.session_state.predictions[selected_alias] = prediction_df
-                else:
-                    st.error("예측 시작일이 데이터 기간을 벗어납니다.")
-            except (IndexError, ValueError):
-                 st.error("샘플 데이터를 생성할 기준 날짜를 찾지 못했습니다.")
+            st.warning(f"API 호출 실패 ({e})")
 
 # --- 차트 그리기 ---
 fig = go.Figure()

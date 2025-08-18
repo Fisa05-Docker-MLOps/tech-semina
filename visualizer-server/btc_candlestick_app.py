@@ -6,6 +6,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import requests
 import os
+import time
 
 # --- 페이지 및 환경 설정 ---
 st.set_page_config(layout="wide")
@@ -35,11 +36,11 @@ def get_model_aliases():
             return ["backtest_20250531"] # 샘플 데이터용 기본 별칭
         return aliases
     except Exception as e:
-        st.sidebar.error(f"DB 연결 실패: {e}")
+        st.sidebar.error(f"alias 연결 실패: {e}")
         # DB 연결 실패 시에도 샘플 별칭을 반환하여 앱이 멈추지 않도록 함
         return ["backtest_20250531"]
 
-model_aliases = get_model_aliases()
+model_aliases = get_model_aliases().get("aliases", [])
 model_aliases_prefix = list(map(lambda x: x.removeprefix('backtest_'), model_aliases))
 
 selected_alias = st.sidebar.selectbox(
@@ -85,22 +86,31 @@ if predict_button:
         try:
             # 1. 날짜 부분만 추출
             start_date_str = datetime.strptime(selected_alias, '%Y%m%d').strftime('%Y-%m-%d')
+
+            # 우선 model 리로드
+            api_endpoint = f"{INFERENCE_SERVER_URL}/reload?alias={selected_alias}"
+            reload_response = requests.post(api_endpoint, timeout=120)
+            time.sleep(5)
             
             # 2. 추론 서버에 예측 요청 (새로운 API 가상)
-            api_endpoint = f"{INFERENCE_SERVER_URL}/predict"
-            payload = {"start_date": start_date_str}
-            response = requests.post(api_endpoint, json=payload, timeout=120)
+            api_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={selected_alias}"
+            response = requests.post(api_endpoint, timeout=120)
             response.raise_for_status()
             
             pred_data = response.json()
             
             # 3. 결과 데이터프레임 생성
             pred_start_date = pd.to_datetime(pred_data['start_date'])
-            pred_dates = [pred_start_date + timedelta(days=i) for i in range(len(pred_data['predictions']))]
+            pred_dates = pd.date_range(start=pred_start_date, periods=len(pred_data['predictions']), freq='h')
             prediction_df = pd.DataFrame({
                 'datetime': pred_dates,
                 'prediction': pred_data['predictions']
             })
+
+            # --- ohlcv_df 마지막 날짜까지만 남기기 ---
+            last_data_date = ohlcv_df['datetime'].max()
+            prediction_df = prediction_df[prediction_df['datetime'] <= last_data_date]
+
             # 딕셔너리에 현재 예측 결과 저장
             st.session_state.predictions[selected_alias] = prediction_df
             st.success(f"✅ '{selected_alias}' 모델 예측 성공!")
@@ -140,7 +150,6 @@ fig.add_trace(go.Candlestick(x=ohlcv_df['datetime'],
 
 # 2. 저장된 모든 예측값을 순회하며 라인 차트로 추가
 if st.session_state.predictions:
-    # 색상 리스트 준비
     colors = ['orange', 'purple', 'green', 'cyan', 'magenta', 'yellow']
     color_idx = 0
     for alias, pred_df in st.session_state.predictions.items():
@@ -153,11 +162,16 @@ if st.session_state.predictions:
         ))
         color_idx += 1
 
-# 차트 레이아웃
-min_price = ohlcv_df['btc_low'].min()
-max_price = ohlcv_df['btc_high'].max()
+# --- y축 범위 재계산 (실제 가격 + 모든 예측값 포함) ---
+all_prices = ohlcv_df[['btc_low', 'btc_high']].stack()
+for pred_df in st.session_state.predictions.values():
+    all_prices = pd.concat([all_prices, pred_df['prediction']])
+
+min_price = all_prices.min()
+max_price = all_prices.max()
 padding = (max_price - min_price) * 0.05
 
+# 차트 레이아웃 업데이트
 fig.update_layout(
     title='BTC/USD Candlestick Chart & Model Prediction',
     yaxis_title='Price (USD)',

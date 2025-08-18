@@ -192,6 +192,75 @@ def predict_batch(alias: str):
         "predictions": predictions
     }
 
+@app.get("/predict-champion")
+def predict_champion():
+    """
+    2025년 상반기 백테스팅 기간 동안,
+    매주 최신 모델(alias)로 시간 단위 예측을 수행합니다.
+    마지막 alias 구간은 /predict와 동일하게 끝까지 예측 생성.
+    """
+    try:
+        # 1. 전체 피처 가져오기 (SEQ_LEN만큼 과거 포함)
+        df_all = fetch_all_features(start_date="2024-12-01 00:00:00")
+        if df_all.empty or len(df_all) < SEQ_LEN:
+            raise HTTPException(status_code=400, detail="데이터가 부족합니다.")
+
+        # datetime 설정
+        df_all["datetime"] = pd.to_datetime(df_all["datetime"])
+        df_all = df_all.sort_values("datetime").set_index("datetime")
+
+        # 2. alias 리스트 가져오기 (DB에서)
+        aliases = get_model_aliases_asc()
+        aliases.sort()  # 날짜 순 정렬
+
+        # 3. 시작 alias 지정
+        start_alias = "backtest_20250327"
+        if start_alias not in aliases:
+            raise HTTPException(status_code=400, detail=f"start_alias {start_alias} 존재하지 않음")
+
+        start_idx = aliases.index(start_alias)
+        aliases = aliases[start_idx:]  # 시작 alias 이전 제거
+
+        all_predictions = []
+
+        for i, alias in enumerate(aliases):
+            logger.info(f"예측 시작 alias: {alias}")
+
+            alias_start = datetime.strptime(alias.replace("backtest_", ""), "%Y%m%d")
+            if i < len(aliases) - 1:
+                next_alias_start = datetime.strptime(aliases[i + 1].replace("backtest_", ""), "%Y%m%d")
+                alias_end = next_alias_start - timedelta(seconds=1)
+            else:
+                alias_end = df_all.index.max()  # 마지막 alias는 끝까지
+
+            df_slice = df_all.loc[alias_start:alias_end]
+            if df_slice.empty:
+                logger.warning(f"{alias} 구간 데이터 없음, 건너뜀")
+                continue
+
+            ensure_model_ready(alias=alias)
+            model = app.state.model
+
+            # 슬라이딩 윈도우
+            for j in range(SEQ_LEN, len(df_slice)+1):
+                X_df = df_slice[FEATURE_COLUMNS].iloc[j-SEQ_LEN:j]
+                try:
+                    y_pred = model.predict(X_df)
+                    all_predictions.append(float(y_pred.tolist()[0]))
+                except Exception:
+                    all_predictions.append(None)
+
+            logger.info(f"{alias} 구간 예측 완료, 총 예측값 누적: {len(all_predictions)}")
+
+        return {
+            "start_date": "2025-03-27 00:00:00",
+            "predictions": all_predictions
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"백테스팅 예측 실패: {e}")
+
+
 @app.get("/aliases")
 def give_aliases():
     '''

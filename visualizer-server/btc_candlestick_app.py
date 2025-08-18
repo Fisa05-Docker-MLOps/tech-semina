@@ -83,54 +83,27 @@ if 'predictions' not in st.session_state:
 if clear_button:
     st.session_state.predictions = {}
 
-# 챔피언 예측 생성 로직
+# 챔피언 예측 생성 버튼 로직
 if champion_button:
     with st.spinner("Champion 모델로 예측을 생성합니다..."):
         try:
-            sorted_model_aliases_prefix = sorted(model_aliases_prefix)
-            start_idx = sorted_model_aliases_prefix.index('20250327')
-            new_alias_list = sorted_model_aliases_prefix[start_idx:]
+            api_endpoint = f"{INFERENCE_SERVER_URL}/predict-champion"
+            response = requests.get(api_endpoint, timeout=300)  # GET 요청
+            response.raise_for_status()
+            pred_data = response.json()
 
-            all_predictions = []
+            pred_start_date = pd.to_datetime(pred_data['start_date'])
+            pred_dates = pd.date_range(start=pred_start_date, periods=len(pred_data['predictions']), freq='h')
+            prediction_df = pd.DataFrame({
+                'datetime': pred_dates,
+                'prediction': pred_data['predictions']
+            })
 
-            for alias in new_alias_list:
-                try:
-                    # 1. 모델 리로드
-                    reload_endpoint = f"{INFERENCE_SERVER_URL}/reload?alias={alias}"
-                    reload_response = requests.post(reload_endpoint, timeout=300)
-                    reload_response.raise_for_status()
-
-                    # 2. 예측 요청
-                    predict_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={alias}"
-                    response = requests.post(predict_endpoint, timeout=300)
-                    response.raise_for_status()
-                    pred_data = response.json()
-
-                    # 3. 전체 예측 DataFrame
-                    pred_start_date = pd.to_datetime(pred_data['start_date'])
-                    pred_dates = pd.date_range(start=pred_start_date, periods=len(pred_data['predictions']), freq='h')
-                    prediction_df = pd.DataFrame({
-                        'datetime': pred_dates,
-                        'prediction': pred_data['predictions']
-                    })
-
-                    # 4. 168시간 extend
-                    slice_df = prediction_df.iloc[0:168]
-                    all_predictions.append(slice_df)
-
-                    st.success(f"✅ {alias} 예측 완료")
-
-                except Exception as e:
-                    st.error(f"Champion 예측 호출 실패 (alias={alias}): {e}")
-
-            # 5. 전체 예측 누적
-            if all_predictions:
-                final_df = pd.concat(all_predictions).reset_index(drop=True)
-                st.session_state.predictions["champion_model"] = final_df
-                st.success("✅ 모든 Champion 예측 완료!")
+            st.session_state.predictions["champion_model"] = prediction_df
+            st.success("✅ Champion 모델 예측 성공!")
 
         except Exception as e:
-            st.error(f"Champion 예측 전체 과정 실패: {e}")
+            st.error(f"Champion 예측 호출 실패: {e}")
 
 # 예측 생성 버튼 로직
 if predict_button:
@@ -144,7 +117,7 @@ if predict_button:
             reload_response = requests.post(api_endpoint, timeout=120)
             time.sleep(5)
             
-            # 2. 추론 서버에 예측 요청
+            # 2. 추론 서버에 예측 요청 (새로운 API 가상)
             api_endpoint = f"{INFERENCE_SERVER_URL}/predict?alias={selected_alias}"
             response = requests.post(api_endpoint, timeout=120)
             response.raise_for_status()

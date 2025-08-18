@@ -134,6 +134,11 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MLFLOW_S3_ENDPOINT_URL:  http://mlflow-artifact-store:9000
+      DB_HOST: mlflow-backend-store
+      DB_PORT: 3306
+      DB_NAME: mlops_db
+      DB_USER: mlops_user
+      DB_PASSWORD: ${MYSQL_USER_PASSWORD}
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:

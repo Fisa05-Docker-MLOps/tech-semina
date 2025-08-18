@@ -1,11 +1,12 @@
 import os
 import pathlib
-from typing import List, Optional, Union
+from typing import List, Optional
 import numpy as np
 import pandas as pd
 import torch
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field, HttpUrl
+import torch.nn as nn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 import httpx
 import joblib
 import mlflow
@@ -46,20 +47,6 @@ app = FastAPI(title="LSTM Inference with MLflow PyFunc", version="2.0.0")
 # =========================
 # 요청/응답 스키마
 # =========================
-class PredictPayload(BaseModel):
-    # 단일 시퀀스 2D: [T, F]
-    X: List[List[float]] = Field(..., description="[T,F] 형식의 입력 데이터")
-    callback_url: Optional[HttpUrl] = None
-    metadata: Optional[dict] = None
-class PredictResponse(BaseModel):
-    pred_btc_close_next: float
-    # pyfunc 모델은 입력의 원본 값을 알 수 없으므로, 필요하다면 클라이언트가 직접 계산해야 합니다.
-    # actual_btc_close_last: float
-    posted_to_callback: bool
-    model_alias: str
-    model_version: str
-
-
 
 class alias_response(BaseModel):
     aliases: List[str]
@@ -73,8 +60,10 @@ class btc_info_response(BaseModel):
     btc_volume: List[float]
 
 
-class predict_date_response(BaseModel):
-    prediction: List[float]
+class PredictSeqResponse(BaseModel):
+    start_date: str
+    predictions: List[float]
+
 
 # =========================
 # 모델 및 상태 관리
@@ -168,37 +157,41 @@ def reload_model(alias: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"모델 리로드 실패: {e}")
 
+
 @app.post("/predict")
-async def predict(req: PredictPayload):
+def predict_batch(alias: str):
     if getattr(app.state, "model", None) is None:
-        raise HTTPException(status_code=503, detail="모델이 로드되지 않았습니다. /reload를 시도하세요.")
-    model = app.state.model
-
+        raise HTTPException(status_code=503, detail="모델이 로드되지 않았습니다. /reload 필요")
+    
+    model = app.state.model  # PyFunc 모델
+    
+    # alias에서 시작일 추출
+    start_date = f"{alias[:4]}-{alias[4:6]}-{alias[6:]} 00:00:00"
+    
+    # features 가져오기
+    df = fetch_all_features(start_date)
+    SEQ_LEN = 12
+    if len(df) < SEQ_LEN:
+        raise HTTPException(status_code=400, detail=f"{start_date} 이후 데이터가 시퀀스 길이보다 부족합니다.")
+    
+    # 슬라이딩 윈도우로 배치 생성
+    sequences = [df[FEATURE_COLUMNS].iloc[i:i+SEQ_LEN].to_dict(orient='records') 
+                 for i in range(len(df)-SEQ_LEN+1)]
+    
+    # pyfunc 모델은 DataFrame 입력 사용
+    import pandas as pd
+    X_df = pd.DataFrame([item for seq in sequences for item in seq])
+    
     try:
-        # alias에서 시작일 추출
-        start_date = app.state.model_alias.replace("backtest_", "")
-        start_date = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]} 00:00:00"
-
-        # features 가져오기
-        df = fetch_all_features(start_date)
-        if df.empty:
-            raise HTTPException(status_code=404, detail=f"{start_date} 이후 데이터가 없습니다.")
-
-        # 순차 예측
-        predictions = []
-        for i in range(len(df)):
-            x_df = pd.DataFrame([df.loc[i, FEATURE_COLUMNS].tolist()], columns=FEATURE_COLUMNS)
-            pred = float(model.predict(x_df)[0])
-            predictions.append(pred)
-
-        return {
-            "start_date": start_date,
-            "predictions": predictions
-        }
-
+        y_pred = model.predict(X_df)  # PyFunc predict 사용
+        predictions = y_pred.tolist()
     except Exception as e:
-        logger.exception("예측 실패")
-        raise HTTPException(status_code=400, detail=f"예측 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"예측 실패: {e}")
+    
+    return {
+        "start_date": start_date,
+        "predictions": predictions
+    }
 
 
 @app.get("/aliases")

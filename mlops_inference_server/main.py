@@ -13,6 +13,7 @@ import time
 from mlflow.exceptions import RestException
 from utils import setup_logger
 from db import fetch_all_btc_four_six, get_model_aliases
+from datetime import datetime
 
 
 # ---- 로그 ----
@@ -50,6 +51,14 @@ app = FastAPI(title="LSTM Inference with MLflow PyFunc", version="2.0.0")
 
 class alias_response(BaseModel):
     aliases: List[str]
+
+class btc_info_response(BaseModel):
+    datetime: List[datetime]
+    btc_open: List[float]
+    btc_high: List[float]
+    btc_low: List[float]
+    btc_close: List[float]
+    btc_volume: List[float]
 
 
 class predict_date_response(BaseModel):
@@ -188,9 +197,32 @@ async def predict(req: PredictPayload, tasks: BackgroundTasks):
 
 @app.get("/aliases")
 def give_aliases():
+    '''
+    모델의 전체 alias를 반환하는 api 추가
+    '''
     try:
         alias_list = get_model_aliases()
         logger.log(msg="aliases 키로 alias list 전송")
         return {"aliases": alias_list}
+    except Exception as e:
+        logger.error(msg=f"데이터베이스로부터 모델 alias를 불러오는데 실패했습니다 {e}")
+
+
+@app.get("/btc-info")
+def give_btc_info():
+    '''
+    2025.04 ~ 2025.06 기간의 btc 정보를 반환하는 api
+    '''
+    try:
+        btc_df = fetch_all_btc_four_six()
+        logger.log(msg="btc 정보 전송")
+        return_dict = {}
+        return_dict[datetime] = btc_df[datetime].tolist()
+        return_dict['btc_open'] = btc_df['btc_open'].tolist()
+        return_dict['btc_high'] = btc_df['btc_high'].tolist() 
+        return_dict['btc_low'] = btc_df['btc_low'].tolist()
+        return_dict['btc_close'] = btc_df['btc_close'].tolist()
+        return_dict['btc_volume'] = btc_df['btc_volume'].tolist()
+        return return_dict
     except Exception as e:
         logger.error(msg=f"데이터베이스로부터 모델 alias를 불러오는데 실패했습니다 {e}")

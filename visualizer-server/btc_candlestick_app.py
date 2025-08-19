@@ -7,10 +7,13 @@ from datetime import datetime, timedelta
 import requests
 import os
 import time
+from dotenv import load_dotenv
 
 # --- 페이지 및 환경 설정 ---
 st.set_page_config(layout="wide")
 st.title("모델별 예측 결과 시각화 대시보드")
+
+load_dotenv()
 
 # 환경 변수에서 서버 주소 가져오기 (없으면 기본값 사용)
 INFERENCE_SERVER_URL = os.environ.get("INFERENCE_SERVER_URL", "http://localhost:8000")
@@ -60,8 +63,6 @@ predict_button = st.sidebar.button(
 clear_button = st.sidebar.button("예측 결과 모두 지우기")
 
 st.sidebar.markdown("--- ")
-st.sidebar.info(f"**추론 서버:** `{INFERENCE_SERVER_URL}`")
-
 # --- 메인 대시보드 ---
 
 # 추론 서버에서 데이터 가져오기

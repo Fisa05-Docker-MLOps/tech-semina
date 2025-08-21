@@ -91,7 +91,7 @@
 
 ### 🧭 시각화 서버 접속
 !["https://visualize-server.streamlit.app/"](visualize-server.png)
-[streamlit 시각화 서버](https://visualize-server.streamlit.app/)
+streamlit 시각화 서버 ([click](https://visualize-server.streamlit.app/))
 
 
 ### 로컬 실행 방법: 💻

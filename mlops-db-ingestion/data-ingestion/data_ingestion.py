@@ -59,22 +59,44 @@ if __name__ == '__main__':
                     start = datetime(2024, 1, 1)
                 else:
                     start = pd.to_datetime(latest_timestamp_str) + pd.Timedelta(hours=1)
+                print(f"다음 데이터 수집 시작 시간: {start}")
             except Exception as e:
                 print(f"Could not get latest timestamp: {e}")
                 start = datetime(2024, 1, 1)
 
             # 2. 개별 데이터 수집
             print("BTC 데이터 수집 중...")
-            btc_df = fetch_btc_data(start)
+            try:
+                btc_df = fetch_btc_data(start)
+            except Exception as e:
+                print(f"BTC 수집 실패: {e}")
+                time.sleep(3600)
+                continue
 
             print("NDX100 데이터 수집 중...")
-            ndx_df = fetch_ndx_data(start.strftime("%Y-%m-%d"))
+            try:
+                ndx_df = fetch_ndx_data(start.strftime("%Y-%m-%d"), conn)
+            except Exception as e:
+                print(f"NDX100 수집 실패: {e}")
+                time.sleep(3600)
+                continue
 
             print("VIX 데이터 수집 중...")
-            vix_df = fetch_vix_data(start.strftime("%Y-%m-%d"))
+            try:
+                vix_df = fetch_vix_data(start.strftime("%Y-%m-%d"), conn)
+            except Exception as e:
+                print(f"VIX 수집 실패: {e}")
+                time.sleep(3600)
+                continue
 
             print("GOLD 데이터 수집 중...")
-            gold_df = fetch_gold_data(start.strftime("%Y-%m-%d"))
+            try:
+                gold_df = fetch_gold_data(start.strftime("%Y-%m-%d"), conn)
+            except Exception as e:
+                print(f"GOLD 수집 실패: {e}")
+                time.sleep(3600)
+                continue
+            
 
             # 3. 전처리 및 병합 과정 추가
             print("수집된 데이터 병합 및 전처리 시작...")
@@ -91,26 +113,24 @@ if __name__ == '__main__':
             vix_df = vix_df.sort_values('datetime')
             gold_df = gold_df.sort_values('datetime')
 
+            # 컬럼명 변경
+            btc_df = btc_df.rename(columns={'open':'btc_open','high':'btc_high','low':'btc_low','close':'btc_close','volume':'btc_volume'})
+            ndx_df = ndx_df.rename(columns={'open':'ndx_open','high':'ndx_high','low':'ndx_low','close':'ndx_close'})
+            vix_df = vix_df.rename(columns={'open':'vix_open','high':'vix_high','low':'vix_low','close':'vix_close'})
+            gold_df = gold_df.rename(columns={'open':'gold_open','high':'gold_high','low':'gold_low','close':'gold_close','volume':'gold_volume'})
+            print(btc_df)
+            print(ndx_df)
+            print(vix_df)
+            print(gold_df)
+
             # BTC와 NDX 병합
             df_merged = pd.merge_asof(
                 btc_df,
                 ndx_df,
                 on='datetime',
                 direction='backward',
-                tolerance=pd.Timedelta('31min')
             )
-
-            # 컬럼명 변경: _x -> btc_, _y -> ndx_
-            df_merged.columns = [
-                col.replace('_x', '').replace('_y', '') if col == 'datetime' else
-                ('btc_' + col.replace('_x', '') if col.endswith('_x')
-                 else 'ndx_' + col.replace('_y', '') if col.endswith('_y')
-                 else col)
-                for col in df_merged.columns
-            ]
-
-            # btc_volume 컬럼명 통일
-            df_merged.rename(columns={"volume" : "btc_volume"}, inplace=True)
+            print(df_merged)
             
             # VIX 데이터 병합
             df_merged2 = pd.merge_asof(
@@ -119,12 +139,7 @@ if __name__ == '__main__':
                 on='datetime',
                 direction='backward'
             )
-            df_merged2 = df_merged2.rename(columns={
-                'open': 'vix_open',
-                'high': 'vix_high',
-                'low': 'vix_low',
-                'close': 'vix_close'
-            })
+            print(df_merged2)
 
             # GOLD 데이터 병합
             df_merged3 = pd.merge_asof(
@@ -133,23 +148,14 @@ if __name__ == '__main__':
                 on='datetime',
                 direction='backward'
             )
-            df_merged3 = df_merged3.rename(columns={
-                'open': 'gold_open',
-                'high': 'gold_high',
-                'low': 'gold_low',
-                'close': 'gold_close',
-                'volume': 'gold_volume'
-            })
+            print(df_merged3)
+            # 4. DB 저장
+            load_dataframe_to_db(conn, df_merged3, "integrated_data")
 
-            # 결측치 처리 (ffill, bfill)
-            final_df = df_merged3.ffill().bfill()
-            print("데이터 병합 및 전처리 완료!")
-
-            # 4. 통합된 데이터프레임을 'integrated_data' 테이블에 적재
-            load_dataframe_to_db(conn, final_df, "integrated_data")
-
-            print("모든 작업 완료! 1시간 후 다시 시작합니다.")
-            time.sleep(3600) # 1 hour
+            # 5. 일정 주기 대기 후 반복
+            print("1시간 대기 후 다음 루프 실행...")
+            time.sleep(3600)
+            
         except Exception as e:
             print(f"An error occurred: {e}")
-            time.sleep(60) # wait for 1 minute before retrying
+            time.sleep(60)

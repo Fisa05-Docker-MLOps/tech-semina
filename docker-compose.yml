@@ -26,13 +26,17 @@ services:
     build:
       context: ./mlops-db-ingestion/data-ingestion
     container_name: mlops-etl-job
-    depends_on:
-      mlflow-backend-store:
-        condition: service_healthy
     environment:
       PASSWD: ${MYSQL_USER_PASSWORD}
       DB_URL: mysql+pymysql://mlops_user:${MYSQL_USER_PASSWORD}@mlflow-backend-store/mlops_db?charset=utf8mb4
+      MYSQL_HOST: mlflow-backend-store
     command: ["python", "data_ingestion.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "python healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   mlflow-artifact-store:
     image: minio/minio:RELEASE.2024-01-18T22-51-28Z
@@ -90,7 +94,7 @@ services:
       mlflow-server:
         condition: service_started
       etl-job:
-        condition: service_completed_successfully
+        condition: service_healthy
     environment:
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow-server:5000

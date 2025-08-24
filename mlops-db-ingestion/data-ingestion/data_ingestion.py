@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Connection
 from dotenv import load_dotenv
 from datetime import datetime
+from pandas.tseries.offsets import DateOffset
 import os
 
 from loader_binance import fetch_btc_data
@@ -56,13 +57,14 @@ if __name__ == '__main__':
             try:
                 latest_timestamp_str = pd.read_sql("SELECT MAX(datetime) FROM integrated_data", conn).iloc[0, 0]
                 if latest_timestamp_str is None or pd.isna(latest_timestamp_str):
-                    start = datetime(2024, 1, 1)
+                    # DB가 비어있으면 "현재 시점 기준 2개월 전"부터 수집 시작
+                    start = datetime.now() - DateOffset(months=2)
                 else:
                     start = pd.to_datetime(latest_timestamp_str) + pd.Timedelta(hours=1)
                 print(f"다음 데이터 수집 시작 시간: {start}")
             except Exception as e:
                 print(f"Could not get latest timestamp: {e}")
-                start = datetime(2024, 1, 1)
+                start = datetime.now() - DateOffset(months=2)
 
             # 2. 개별 데이터 수집
             print("BTC 데이터 수집 중...")
@@ -155,7 +157,7 @@ if __name__ == '__main__':
             # 5. 일정 주기 대기 후 반복
             print("1시간 대기 후 다음 루프 실행...")
             time.sleep(3600)
-            
+
         except Exception as e:
             print(f"An error occurred: {e}")
             time.sleep(60)

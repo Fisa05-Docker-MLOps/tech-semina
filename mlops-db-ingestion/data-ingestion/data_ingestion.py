@@ -15,9 +15,14 @@ from loader_ndx import fetch_ndx_data
 
 load_dotenv()
 
-db_passwd = os.getenv("PASSWD")
-DB_URL = f"mysql+pymysql://mlops_user:{db_passwd}@mlflow-backend-store/mlops_db?charset=utf8mb4"
-engine = create_engine(DB_URL, pool_pre_ping=True, future=True)
+import logging
+
+logging.basicConfig()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+
+db_passwd = os.getenv("MYSQL_USER_PASSWORD")
+DB_URL = f"mysql+pymysql://mlops_user:{db_passwd}@localhost:3306/mlops_db?charset=utf8mb4"
+engine = create_engine(DB_URL, pool_pre_ping=True, future=True, connect_args={'autocommit': True})
 
 def connect_to_db_with_sqlalchemy() -> Connection:
     max_retries = 20
@@ -33,8 +38,14 @@ def connect_to_db_with_sqlalchemy() -> Connection:
 
 def load_dataframe_to_db(conn: Connection, df: pd.DataFrame, table_name: str):
     print(f"테이블 '{table_name}'에 데이터 적재 시작...")
-    df.to_sql(name=table_name, con=conn, if_exists='append', index=False)
-    print(f"테이블 '{table_name}'에 데이터 적재 완료!")
+    if df.empty:
+        print("데이터프레임이 비어있어 DB에 저장하지 않습니다.")
+        return
+    try:
+        df.to_sql(name=table_name, con=conn, if_exists='append', index=False)
+        print(f"테이블 '{table_name}'에 데이터 적재 완료!")
+    except Exception as e:
+        print(f"DB 적재 중 오류 발생: {e}")
 
 if __name__ == '__main__':
     conn = connect_to_db_with_sqlalchemy()
@@ -44,30 +55,26 @@ if __name__ == '__main__':
             # 1. db에서 마지막 시간 가져오기
             try:
                 latest_timestamp_str = pd.read_sql("SELECT MAX(datetime) FROM integrated_data", conn).iloc[0, 0]
-                start = pd.to_datetime(latest_timestamp_str) + pd.Timedelta(hours=1)
+                if latest_timestamp_str is None or pd.isna(latest_timestamp_str):
+                    start = datetime(2024, 1, 1)
+                else:
+                    start = pd.to_datetime(latest_timestamp_str) + pd.Timedelta(hours=1)
             except Exception as e:
                 print(f"Could not get latest timestamp: {e}")
                 start = datetime(2024, 1, 1)
 
-            end = datetime.now()
-
-            if start > end:
-                print("No new data to fetch. Waiting for the next interval.")
-                time.sleep(3600)
-                continue
-
             # 2. 개별 데이터 수집
             print("BTC 데이터 수집 중...")
-            btc_df = fetch_btc_data(start, end)
+            btc_df = fetch_btc_data(start)
 
             print("NDX100 데이터 수집 중...")
-            ndx_df = fetch_ndx_data(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+            ndx_df = fetch_ndx_data(start.strftime("%Y-%m-%d"))
 
             print("VIX 데이터 수집 중...")
-            vix_df = fetch_vix_data(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+            vix_df = fetch_vix_data(start.strftime("%Y-%m-%d"))
 
             print("GOLD 데이터 수집 중...")
-            gold_df = fetch_gold_data(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+            gold_df = fetch_gold_data(start.strftime("%Y-%m-%d"))
 
             # 3. 전처리 및 병합 과정 추가
             print("수집된 데이터 병합 및 전처리 시작...")

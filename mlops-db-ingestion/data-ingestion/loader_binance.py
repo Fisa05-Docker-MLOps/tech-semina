@@ -4,7 +4,7 @@ import ccxt
 from datetime import datetime
 
 def fetch_btc_data(start_date: datetime) -> pd.DataFrame:
-    exchange = ccxt.binanceus()
+    exchange = ccxt.binance()
     symbol = 'BTC/USDT'
     timeframe = '1h'
     limit = 1000
